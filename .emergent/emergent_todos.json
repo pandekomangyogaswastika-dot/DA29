@@ -1,22 +1,26 @@
 [
   {
-    "content": "FASE 1: System Inventory - DONE",
+    "content": "P0.1: Fix 4 Broken Menus - DONE & VERIFIED",
     "status": "completed"
   },
   {
-    "content": "FASE 2: Cross-Module Dependency Mapping - DONE",
+    "content": "P0.2: Relocate Misplaced Menus - DONE & VERIFIED",
     "status": "completed"
   },
   {
-    "content": "FASE 3-7: Business Process, Data Architecture, UX, Design, Synthesis - DONE",
+    "content": "P0.3: Hide Legacy Sidebar Labels - DONE & VERIFIED",
     "status": "completed"
   },
   {
-    "content": "Generate FORENSIC_00 to FORENSIC_11 (12 deliverables) - DONE",
+    "content": "P0.4: Cleanup Backup Files & Placeholders - DONE",
     "status": "completed"
   },
   {
-    "content": "Tunggu user approval untuk eksekusi P0 dan keputusan kritis",
-    "status": "in_progress"
+    "content": "P0.5: Remove Duplicate Stock Views + Strip excessive 'BARU' badges - DONE & VERIFIED",
+    "status": "completed"
+  },
+  {
+    "content": "P0.6: All P0 changes tested & verified working",
+    "status": "completed"
   }
 ]

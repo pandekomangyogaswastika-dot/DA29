@@ -46,7 +46,6 @@ function makeModuleWithTab(ModuleComponent, defaultTab) {
 const ManagementDashboard = lazy(() => import('./ManagementDashboard'));
 const WarehouseDashboard  = lazy(() => import('./WarehouseDashboard'));
 const FinanceDashboard    = lazy(() => import('./FinanceDashboard'));
-const ProductionDashboardPlaceholder = lazy(() => import('./ProductionDashboardPlaceholder'));
 // Sprint 1.2: Replace placeholder with real HR Dashboard
 const HRDashboard = lazy(() => import('./HRDashboard'));
 
@@ -458,6 +457,12 @@ export const MODULE_REGISTRY = {
   // Produksi · Bundle Traceability (Phase 17A)
   'prod-bundles':      RahazaBundlesModule,
 
+  // ── P0 FIX: Previously broken menus ────────────────────────────────────
+  // Papan Rework — was missing mapping, falls back to ManagementDashboard
+  'prod-rework-board':    BundleReworkBoard,
+  // Pengaturan Alert — was missing mapping
+  'prod-alert-settings':  RahazaAlertSettingsModule,
+
   // Produksi · Eksekusi Proses — CV. Dewi Aditya (Cutting/CMT/Finishing/QC/Packing)
   'prod-exec-cutting':  ProcessExecutionModule,
   'prod-exec-sewing':   ProcessExecutionModule,
@@ -769,6 +774,12 @@ export const MODULE_REGISTRY = {
   'asset-procurement':        lazy(() => import('./AssetManagementPortal')),
 
   // ─── Redirect stubs — backwards compatibility ──────────────────────────
+  // P0 FIX: Maklon legacy items moved to Production portal
+  // maklon-orders → maklon-po (new PO system)
+  'maklon-orders':           makeRedirect('maklon-po'),
+  // maklon-cmt and maklon-packing belong in Production portal (CMT is outsourcing, part of production)
+  'maklon-cmt':              makeRedirect('prod-cmt'),
+  'maklon-packing':          makeRedirect('prod-cmt-packing'),
   // Task 1.1: mgmt-products → prod-models-bom
   'mgmt-products':           makeRedirect('prod-models-bom', 'models'),
   // Task 1.1: wh-material-reservation → prod-material-reservation

@@ -108,10 +108,10 @@ const PORTAL_NAV = {
         items: [
           { id: 'management-dashboard',  label: 'Dashboard Eksekutif',     icon: LayoutDashboard },
           { id: 'mgmt-overview',         label: 'Ringkasan Bisnis',        icon: TrendingUp },
-          { id: 'phase7-reports',        label: 'Laporan & Dashboard (Maklon/CMT)', icon: BarChart3, badge: 'BARU' },
+          { id: 'phase7-reports',        label: 'Laporan & Dashboard (Maklon/CMT)', icon: BarChart3 },
           { id: 'mgmt-reports',          label: 'Laporan',                 icon: FileSpreadsheet },
           { id: 'mgmt-rahaza-customers', label: 'Data Pelanggan',          icon: UserCircle2 },
-          { id: 'rnd-dashboard',         label: 'Portal RnD (Shortcut)',   icon: FlaskConical, badge: 'PORTAL' },
+          { id: 'rnd-dashboard',         label: 'Portal RnD',              icon: FlaskConical },
         ]
       },
       {
@@ -130,10 +130,10 @@ const PORTAL_NAV = {
       {
         label: 'TOOLS & DIGEST',
         items: [
-          { id: 'mgmt-tools',           label: 'Weekly Digest & Audit',   icon: BarChart3,  badge: 'BARU' },
-          { id: 'ai-business-dashboard',label: 'AI Business Intelligence', icon: Brain,      badge: 'AI' },
-          { id: 'mgmt-okr',             label: 'Strategic OKR Tracker',   icon: Target,     badge: 'BARU' },
-          { id: 'ai-usage-monitor',     label: 'AI Usage Monitor',        icon: Activity,   badge: 'BARU' },
+          { id: 'mgmt-tools',           label: 'Weekly Digest & Audit',    icon: BarChart3 },
+          { id: 'ai-business-dashboard',label: 'AI Business Intelligence', icon: Brain,    badge: 'AI' },
+          { id: 'mgmt-okr',             label: 'Strategic OKR Tracker',    icon: Target },
+          { id: 'ai-usage-monitor',     label: 'AI Usage Monitor',         icon: Activity },
         ]
       },
     ]
@@ -195,9 +195,10 @@ const PORTAL_NAV = {
           {
             label: 'CMT & Sub-Proses',
             items: [
-              { id: 'prod-cmt',                              label: 'Manajemen CMT',       icon: Factory },
-              { id: 'prod-cmt-packing',                     label: 'Packing & Opname CMT', icon: PackageCheck, badge: 'BARU' },
-              { id: 'production-cmt-component-requests',    label: 'Kekurangan Komponen',  icon: PackageSearch, badge: 'BARU' },
+              { id: 'prod-cmt',                              label: 'Manajemen CMT',         icon: Factory },
+              { id: 'cmt-progress',                          label: 'Progress CMT & DO',     icon: BarChart3 },
+              { id: 'prod-cmt-packing',                     label: 'Packing & Opname CMT', icon: PackageCheck },
+              { id: 'production-cmt-component-requests',    label: 'Kekurangan Komponen',  icon: PackageSearch },
               { id: 'prod-exec-rework',                     label: 'Rework / Revisi',      icon: RotateCcw },
             ]
           },
@@ -229,7 +230,7 @@ const PORTAL_NAV = {
               { id: 'prod-backlog',                 label: 'Backlog & Forecast',     icon: TrendingUp },
               { id: 'prod-ai-insights',             label: 'AI Insights & Chatbot',  icon: Brain },
               { id: 'ai-actions',                   label: 'AI Action Items',        icon: CheckSquare },
-              { id: 'prod-predictive-maintenance',  label: 'Predictive Maintenance', icon: Wrench, badge: 'BARU' },
+              { id: 'prod-predictive-maintenance',  label: 'Predictive Maintenance', icon: Wrench, badge: 'AI' },
             ]
           },
         ]
@@ -278,12 +279,9 @@ const PORTAL_NAV = {
           { id: 'wh-materials',           label: 'Master Material',           icon: Boxes,    indent: 1 },
           { id: 'wh-stock',               label: 'Stok & Pergerakan',         icon: Archive,  indent: 1 },
           { id: 'wh-material-issue',      label: 'Material Issue',            icon: PackageMinus, indent: 1 },
-          { id: 'inv-accessories-header', label: '✨ Aksesoris & Finishing',  icon: Sparkles, isHeader: true },
-          { id: 'wh-accessory-master',    label: 'Master Aksesoris',          icon: Boxes,    indent: 1 },
-          { id: 'wh-accessory-stock',     label: 'Stok & Pergerakan',         icon: Archive,  indent: 1 },
           { id: 'inv-fg-header',          label: '👕 Produk Jadi (FG)',       icon: Package,  isHeader: true },
           { id: 'wh-fg',                  label: 'Inventory & Pergerakan FG', icon: Archive,  indent: 1 },
-          { id: 'unified-inventory',      label: 'Unified Inventory Viewer',  icon: Boxes,    badge: 'BARU' },
+          { id: 'unified-inventory',      label: 'Unified Inventory Viewer',  icon: Boxes },
         ]
       },
       {
@@ -291,27 +289,27 @@ const PORTAL_NAV = {
         items: [
           { id: 'wh-purchase-orders',           label: 'Purchase Order (PO)',             icon: FileText },
           { id: 'wh-receiving',                 label: 'Penerimaan Barang (GRN)',         icon: PackagePlus },
-          { id: 'do-management',                label: 'Delivery Orders (DO/Surat Jalan)', icon: Truck,         badge: 'BARU' },
-          { id: 'fulfillment',                  label: 'Fulfillment (Order → FG Out)',    icon: Send,          badge: 'BARU' },
-          { id: 'wh-supplier-scorecard',        label: 'Supplier Scorecard & AQL',       icon: Award,        badge: 'BARU' },
+          { id: 'do-management',                label: 'Delivery Orders (DO/Surat Jalan)', icon: Truck },
+          { id: 'fulfillment',                  label: 'Fulfillment (Order → FG Out)',    icon: Send },
+          { id: 'wh-supplier-scorecard',        label: 'Supplier Scorecard & AQL',       icon: Award },
           { id: 'wh-putaway',                   label: 'Put-Away',                        icon: ArrowRightLeft },
-          { id: 'wh-picklist',                  label: 'Pick List',                       icon: ClipboardList, badge: 'BARU' },
+          { id: 'wh-picklist',                  label: 'Pick List',                       icon: ClipboardList },
           { id: 'wh-opname',                    label: 'Stok Opname',                    icon: ClipboardCheck },
           { id: 'wh-bin',                        label: 'Lokasi / Bin',                   icon: MapPin },
           { id: 'wh-accessory-ops',             label: 'Transaksi Aksesoris',            icon: Sparkles },
-          { id: 'warehouse-accessory-requests', label: 'Inbox Request Aksesoris (RnD)', icon: PackageSearch, badge: 'BARU' },
-          { id: 'wh-returns',                   label: 'Return & Refund',                icon: RotateCcw,    badge: 'BARU' },
-          { id: 'warehouse-smart',              label: 'Alert, Reorder & Undo',          icon: AlertTriangle, badge: 'BARU' },
+          { id: 'warehouse-accessory-requests', label: 'Inbox Request Aksesoris (RnD)', icon: PackageSearch },
+          { id: 'wh-returns',                   label: 'Return & Refund',                icon: RotateCcw },
+          { id: 'warehouse-smart',              label: 'Alert, Reorder & Undo',          icon: AlertTriangle },
         ]
       },
       {
         label: 'GARMENT WMS (ADVANCED)',
         items: [
-          { id: 'wms',                label: 'WMS Scanner (Barcode)',   icon: Scan,      badge: 'BARU' },
-          { id: 'wms-fabric-rolls',   label: 'Fabric Roll Tracking',   icon: Package,   badge: 'P0' },
-          { id: 'wms-delivery-notes', label: 'Surat Jalan',            icon: FileText,  badge: 'P0' },
-          { id: 'wms-cmt-dispatches', label: 'CMT Material Dispatch',  icon: Truck,     badge: 'P1' },
-          { id: 'wms-opname-enhanced',label: 'Opname Enhanced (AI)',   icon: BarChart3, badge: 'P1' },
+          { id: 'wms',                label: 'WMS Scanner (Barcode)',   icon: Scan },
+          { id: 'wms-fabric-rolls',   label: 'Fabric Roll Tracking',   icon: Package },
+          { id: 'wms-delivery-notes', label: 'Surat Jalan',            icon: FileText },
+          { id: 'wms-cmt-dispatches', label: 'CMT Material Dispatch',  icon: Truck },
+          { id: 'wms-opname-enhanced',label: 'Opname Enhanced (AI)',   icon: BarChart3 },
         ]
       },
     ]
@@ -387,8 +385,8 @@ const PORTAL_NAV = {
             items: [
               { id: 'fin-cash-flow',   label: 'Laporan Arus Kas',         icon: Wallet },
               { id: 'fin-ap-aging',    label: 'Aging Hutang (AP)',         icon: Hourglass },
-              { id: 'fin-budget',      label: 'Anggaran (Budget)',         icon: PieChart,   badge: 'BARU' },
-              { id: 'fin-fixed-assets',label: 'Aset Tetap & Depresiasi',  icon: Package,    badge: 'BARU' },
+              { id: 'fin-budget',      label: 'Anggaran (Budget)',         icon: PieChart },
+              { id: 'fin-fixed-assets',label: 'Aset Tetap & Depresiasi',  icon: Package },
             ]
           },
         ]
@@ -406,7 +404,7 @@ const PORTAL_NAV = {
           { id: 'hr-employees',  label: 'Data Karyawan & Kontrak', icon: Users },
           { id: 'hr-org-chart',  label: 'Struktur Organisasi',     icon: LayoutGrid },
           { id: 'hr-assets',     label: 'Aset Karyawan',           icon: Package },
-          { id: 'hr-admin',      label: 'HR Admin & Seed',         icon: Settings,   badge: 'BARU' },
+          { id: 'hr-admin',      label: 'HR Admin & Seed',         icon: Settings },
         ]
       },
       {
@@ -418,7 +416,7 @@ const PORTAL_NAV = {
           { id: 'onboarding-header',          label: '👋 Onboarding',            icon: ClipboardCheck, isHeader: true },
           { id: 'hr-onboarding',              label: 'Onboarding Checklist',     icon: ClipboardCheck, indent: 1 },
           { id: 'career-header',              label: '💼 Career Development',    icon: Briefcase,      isHeader: true },
-          { id: 'hr-job-board',               label: 'Internal Job Board',       icon: Briefcase,      badge: 'BARU', indent: 1 },
+          { id: 'hr-job-board',               label: 'Internal Job Board',       icon: Briefcase,      indent: 1 },
         ]
       },
       {
@@ -426,15 +424,15 @@ const PORTAL_NAV = {
         items: [
           { id: 'attendance-header',      label: '⏰ Absensi & Clock In/Out', icon: Clock,       isHeader: true },
           { id: 'hr-attendance',          label: 'Absensi Harian (Manual)',  icon: Clock,       indent: 1 },
-          { id: 'hr-auto-attendance',     label: 'Absen Otomatis',           icon: Scan,        badge: 'BARU', indent: 1 },
-          { id: 'hr-attendance-approval', label: 'Approval Absen',           icon: CheckSquare, badge: 'BARU', indent: 1 },
+          { id: 'hr-auto-attendance',     label: 'Absen Otomatis',           icon: Scan,        indent: 1 },
+          { id: 'hr-attendance-approval', label: 'Approval Absen',           icon: CheckSquare, indent: 1 },
           { id: 'shift-header',           label: '📅 Shift & Jadwal Kerja',  icon: Calendar,    isHeader: true },
-          { id: 'hr-shift-scheduler',     label: 'Auto Shift Scheduler',     icon: Calendar,    badge: 'BARU', indent: 1 },
+          { id: 'hr-shift-scheduler',     label: 'Auto Shift Scheduler',     icon: Calendar,    indent: 1 },
           { id: 'overtime-header',        label: '🌙 Lembur & Overtime',     icon: Hourglass,   isHeader: true },
-          { id: 'hr-overtime',            label: 'Request Lembur',           icon: Hourglass,   badge: 'BARU', indent: 1 },
+          { id: 'hr-overtime',            label: 'Request Lembur',           icon: Hourglass,   indent: 1 },
           { id: 'leave-header',           label: '🏖️ Cuti & Izin',          icon: Calendar,    isHeader: true },
           { id: 'hr-leave',               label: 'Izin & Cuti',              icon: Calendar,    indent: 1 },
-          { id: 'hr-leave-balances',      label: 'Saldo Cuti',               icon: CalendarDays, badge: 'BARU', indent: 1 },
+          { id: 'hr-leave-balances',      label: 'Saldo Cuti',               icon: CalendarDays, indent: 1 },
         ]
       },
       {
@@ -444,7 +442,7 @@ const PORTAL_NAV = {
           { id: 'hr-kpi',          label: 'KPI Bulanan (Operasional)', icon: Target,       indent: 1 },
           { id: 'review-header',   label: '📊 Performance Review',    icon: TrendingUp,   isHeader: true },
           { id: 'hr-performance',  label: 'Annual Review (Tahunan)',  icon: TrendingUp,   indent: 1 },
-          { id: 'hr-360-feedback', label: '360° Feedback',            icon: MessageSquare, badge: 'BARU', indent: 1 },
+          { id: 'hr-360-feedback', label: '360° Feedback',            icon: MessageSquare, indent: 1 },
           { id: 'learning-header', label: '📚 Learning & Development', icon: GraduationCap, isHeader: true },
           { id: 'hr-lms',          label: 'Learning Management',      icon: GraduationCap, indent: 1 },
         ]
@@ -454,7 +452,7 @@ const PORTAL_NAV = {
         items: [
           { id: 'hr-payroll-profiles',   label: 'Profil Gaji Karyawan',     icon: Contact },
           { id: 'hr-payroll-allowances', label: 'Tunjangan Tetap',          icon: HandCoins },
-          { id: 'hr-salary-adjustments', label: 'Kenaikan Gaji (Approval)', icon: TrendingUp, badge: 'BARU' },
+          { id: 'hr-salary-adjustments', label: 'Kenaikan Gaji (Approval)', icon: TrendingUp },
           { id: 'hr-payroll-run',        label: 'Penggajian & Slip',        icon: Banknote },
         ]
       },
@@ -464,7 +462,7 @@ const PORTAL_NAV = {
           { id: 'ai-insights-header', label: '📊 AI Insights & Analytics', icon: Brain,        isHeader: true },
           { id: 'hr-ai-insights',     label: 'HR Dashboard dengan AI',     icon: Brain,        indent: 1 },
           { id: 'hr-attrition',       label: 'Predictive Attrition',       icon: TrendingDown, badge: 'AI', indent: 1 },
-          { id: 'hr-skill-gap',       label: 'Skill Gap Analysis',         icon: Target,       badge: 'BARU', indent: 1 },
+          { id: 'hr-skill-gap',       label: 'Skill Gap Analysis',         icon: Target,       indent: 1 },
           { id: 'ai-tools-header',    label: '🤖 AI Tools',                icon: Lightbulb,    isHeader: true },
           { id: 'hr-coaching',        label: 'Performance Coaching AI',    icon: Lightbulb,    badge: 'AI', indent: 1 },
           { id: 'ai-actions-header',  label: '⚡ Action Items',            icon: CheckSquare,  isHeader: true },
@@ -483,27 +481,27 @@ const PORTAL_NAV = {
         items: [
           { id: 'rnd-dashboard',           label: 'Dashboard RnD',              icon: LayoutDashboard },
           { id: 'rnd-styles',              label: 'Style & Tech Pack',           icon: Palette },
-          { id: 'rnd-variants',            label: 'Varian Produk (Color/Size)',  icon: Layers,      badge: 'BARU' },
+          { id: 'rnd-variants',            label: 'Varian Produk (Color/Size)',  icon: Layers },
           { id: 'rnd-samples',             label: 'Sample Requests',             icon: FlaskConical },
           { id: 'rnd-revisions',           label: 'Revisi & Approval',           icon: ClipboardCheck },
-          { id: 'rnd-accessory-requests',  label: 'Request Aksesoris',           icon: Package,     badge: 'BARU' },
+          { id: 'rnd-accessory-requests',  label: 'Request Aksesoris',           icon: Package },
         ]
       },
       {
         label: 'MATERIAL, POLA & MARKING',
         items: [
           { id: 'rnd-materials', label: 'Material Research',         icon: Beaker },
-          { id: 'rnd-patterns',  label: 'Dokumentasi Pola & Marking', icon: Ruler, badge: 'BARU' },
+          { id: 'rnd-patterns',  label: 'Dokumentasi Pola & Marking', icon: Ruler },
         ]
       },
       {
         label: 'TECH PACK, COSTING & AI',
         items: [
-          { id: 'rnd-techpack',           label: 'Tech Pack Manager',       icon: FileText,  badge: 'BARU' },
+          { id: 'rnd-techpack',           label: 'Tech Pack Manager',       icon: FileText },
           { id: 'rnd-costing',            label: 'Sample Costing',          icon: Calculator },
-          { id: 'rnd-hpp',                label: 'HPP Calculator',          icon: TrendingUp, badge: 'BARU' },
+          { id: 'rnd-hpp',                label: 'HPP Calculator',          icon: TrendingUp },
           { id: 'rnd-analytics',          label: 'RnD Analytics',           icon: BarChart3 },
-          { id: 'rnd-kreator-requests',   label: 'Approve Kreator Request', icon: Users,     badge: 'BARU' },
+          { id: 'rnd-kreator-requests',   label: 'Approve Kreator Request', icon: Users },
         ]
       },
     ]
@@ -527,17 +525,17 @@ const PORTAL_NAV = {
         items: [
           { id: 'portal-payslip',       label: 'Slip Gaji Saya',   icon: Banknote },
           { id: 'kpi-portal',           label: 'KPI Saya',         icon: Target },
-          { id: 'portal-annual-review', label: 'My Annual Review', icon: Target, badge: 'BARU' },
+          { id: 'portal-annual-review', label: 'My Annual Review', icon: Target },
         ]
       },
       {
         label: 'PENGEMBANGAN, KARIR & DOKUMEN',
         items: [
-          { id: 'portal-training',      label: 'Training Saya',  icon: BookOpen },
-          { id: 'portal-peer-feedback', label: 'Peer Feedback',  icon: MessageSquareIcon, badge: 'BARU' },
+          { id: 'portal-training',      label: 'Training Saya',   icon: BookOpen },
+          { id: 'portal-peer-feedback', label: 'Peer Feedback',   icon: MessageSquareIcon },
           { id: 'portal-career-coach',  label: 'AI Career Coach', icon: Brain,             badge: 'AI' },
-          { id: 'portal-workspace',     label: 'My Workspace',   icon: Star,              badge: 'BARU' },
-          { id: 'portal-documents',     label: 'Dokumen Saya',   icon: FileTextIcon,      badge: 'BARU' },
+          { id: 'portal-workspace',     label: 'My Workspace',    icon: Star },
+          { id: 'portal-documents',     label: 'Dokumen Saya',    icon: FileTextIcon },
         ]
       },
     ]
@@ -551,28 +549,19 @@ const PORTAL_NAV = {
         items: [
           { id: 'maklon-dashboard', label: 'Dashboard Maklon',    icon: Package },
           { id: 'maklon-clients',   label: 'Data Klien Maklon',   icon: Users },
-          { id: 'maklon-po',        label: 'PO Maklon (Baru)',    icon: ClipboardList, badge: 'NEW' },
-          { id: 'maklon-orders',    label: 'Order Maklon (Lama)', icon: ClipboardList },
+          { id: 'maklon-po',        label: 'PO Maklon',           icon: ClipboardList },
           { id: 'maklon-samples',   label: 'Sample Management',   icon: ClipboardCheck },
           { id: 'maklon-tracking',  label: 'Tracking Produksi',   icon: Activity },
         ]
       },
       {
-        label: 'OPERASIONAL',
-        items: [
-          { id: 'maklon-cmt',     label: 'CMT Assignment',         icon: Factory },
-          { id: 'cmt-progress',   label: 'Progress & DO',          icon: BarChart3, badge: 'NEW' },
-          { id: 'maklon-qc',      label: 'QC & Reject',            icon: ClipboardCheck },
-          { id: 'maklon-packing', label: 'Packing & Pengiriman',   icon: PackageOpen },
-        ]
-      },
-      {
         label: 'KEUANGAN & ANALITIK',
         items: [
-          { id: 'maklon-billing',       label: 'Invoice & Billing',       icon: Banknote },
-          { id: 'maklon-hpp',           label: 'HPP Jasa Jahit',          icon: Target },
-          { id: 'maklon-sla-dashboard', label: 'SLA Dashboard & Lead Time', icon: Target, badge: 'BARU' },
-          { id: 'maklon-ai-quote',      label: 'AI Quote Generator',      icon: Sparkles, badge: 'AI' },
+          { id: 'maklon-billing',       label: 'Invoice & Billing',         icon: Banknote },
+          { id: 'maklon-hpp',           label: 'HPP Jasa Jahit',            icon: Target },
+          { id: 'maklon-sla-dashboard', label: 'SLA Dashboard & Lead Time', icon: Target },
+          { id: 'maklon-ai-quote',      label: 'AI Quote Generator',        icon: Sparkles, badge: 'AI' },
+          { id: 'maklon-qc',            label: 'QC & Reject',                icon: ClipboardCheck },
         ]
       },
       {
@@ -611,16 +600,14 @@ const PORTAL_NAV = {
             label: '🏪 Marketplace & Katalog',
             items: [
               { id: 'marketing-catalog', label: 'Manajemen Katalog', icon: Layers },
-              { id: 'toko-channels',     label: 'Channel Manager (Lama)',  icon: Cable },
-              { id: 'toko-pricing',      label: 'Harga & Flashsale (Lama)', icon: Zap },
             ]
           },
           {
             label: '⭐ KOL & Creator',
             items: [
-              { id: 'marketing-kol',              label: 'KOL & Creator Mgmt', icon: Star },
-              { id: 'marketing-kreator-requests', label: 'Kreator Requests',   icon: Users, badge: 'BARU' },
-              { id: 'marketing-livehost',         label: 'LiveHost Management', icon: Radio, badge: 'BARU' },
+              { id: 'marketing-kol',              label: 'KOL & Creator Mgmt',   icon: Star },
+              { id: 'marketing-kreator-requests', label: 'Kreator Requests',     icon: Users },
+              { id: 'marketing-livehost',         label: 'LiveHost Management',  icon: Radio },
             ]
           },
           {
@@ -648,9 +635,9 @@ const PORTAL_NAV = {
           {
             label: '📋 Laporan PIC',
             items: [
-              { id: 'marketing-daily-report',   label: 'Laporan Harian',   icon: CalendarCheck, badge: 'BARU' },
-              { id: 'marketing-monthly-report', label: 'Laporan Bulanan',  icon: BarChart3,     badge: 'BARU' },
-              { id: 'marketing-targets',        label: 'Target Bulanan',   icon: Target,        badge: 'BARU' },
+              { id: 'marketing-daily-report',   label: 'Laporan Harian',   icon: CalendarCheck },
+              { id: 'marketing-monthly-report', label: 'Laporan Bulanan',  icon: BarChart3 },
+              { id: 'marketing-targets',        label: 'Target Bulanan',   icon: Target },
             ]
           },
           {
@@ -701,7 +688,7 @@ const PORTAL_NAV = {
         label: 'KOLABORASI',
         items: [
           { id: 'collaboration',        label: 'Portal Kolaborasi',    icon: MessageSquare },
-          { id: 'collab-workspace',     label: 'My Workspace (Spreadsheet)', icon: FileText, badge: 'BARU' },
+          { id: 'collab-workspace',     label: 'My Workspace (Spreadsheet)', icon: FileText },
         ]
       }
     ]
