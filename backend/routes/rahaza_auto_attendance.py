@@ -57,7 +57,7 @@ router = APIRouter(prefix="/api/rahaza", tags=["rahaza-auto-attendance"])
 # ─── Config ──────────────────────────────────────────────────────────────────
 RP_ID = os.environ.get("WEBAUTHN_RP_ID", "analytics-builds.preview.emergentagent.com")
 RP_NAME = os.environ.get("WEBAUTHN_RP_NAME", "Dewi Aditya ERP")
-ORIGIN = os.environ.get("WEBAUTHN_ORIGIN", "https://erp-multi-currency.preview.emergentagent.com")
+ORIGIN = os.environ.get("WEBAUTHN_ORIGIN", "https://workspace-hub-build.preview.emergentagent.com")
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
 
 DEFAULT_FACE_THRESHOLD = 0.65  # minimum confidence untuk auto-approve

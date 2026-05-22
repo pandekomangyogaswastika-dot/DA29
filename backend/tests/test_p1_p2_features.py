@@ -9,7 +9,7 @@ import requests
 import os
 import io
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://erp-multi-currency.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://workspace-hub-build.preview.emergentagent.com').rstrip('/')
 
 @pytest.fixture(scope="module")
 def auth_headers():

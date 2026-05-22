@@ -21,7 +21,7 @@ import sys
 from datetime import datetime, date
 
 # Configuration
-BASE_URL = "https://maklon-hub.preview.emergentagent.com"
+BASE_URL = "https://workspace-hub-build.preview.emergentagent.com"
 ADMIN_EMAIL = "admin@garment.com"
 ADMIN_PASSWORD = "Admin@123"
 VENDOR1_EMAIL = "vendor1@cmt.com"

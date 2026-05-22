@@ -10,7 +10,7 @@ import sys
 from datetime import datetime, date
 
 class DewiPhase7Tester:
-    def __init__(self, base_url="https://maklon-hub.preview.emergentagent.com"):
+    def __init__(self, base_url="https://workspace-hub-build.preview.emergentagent.com"):
         self.base_url = base_url
         self.admin_token = None
         self.vendor_token = None
@@ -581,7 +581,7 @@ CV. DEWI ADITYA ERP — BACKEND API TEST
 Phase 7 Reports & Unified Inventory Testing
 {'='*80}
 Test Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-Base URL: https://maklon-hub.preview.emergentagent.com
+Base URL: https://workspace-hub-build.preview.emergentagent.com
 {'='*80}
 
 Testing Scope:
