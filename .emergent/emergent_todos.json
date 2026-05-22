@@ -1,26 +1,38 @@
 [
   {
-    "content": "P0.1: Fix 4 Broken Menus - DONE & VERIFIED",
+    "content": "Eksplorasi state - DONE",
     "status": "completed"
   },
   {
-    "content": "P0.2: Relocate Misplaced Menus - DONE & VERIFIED",
+    "content": "P2.G1: Communication Hub - SKIP (sudah lengkap)",
     "status": "completed"
   },
   {
-    "content": "P0.3: Hide Legacy Sidebar Labels - DONE & VERIFIED",
+    "content": "P2.G2: Asset Management - SKIP (sudah lengkap)",
     "status": "completed"
   },
   {
-    "content": "P0.4: Cleanup Backup Files & Placeholders - DONE",
+    "content": "P2.G3: My Workspace - SKIP (sudah lengkap P0-P5)",
     "status": "completed"
   },
   {
-    "content": "P0.5: Remove Duplicate Stock Views + Strip excessive 'BARU' badges - DONE & VERIFIED",
+    "content": "P2.G4: Marketing Seed Data - DONE",
     "status": "completed"
   },
   {
-    "content": "P0.6: All P0 changes tested & verified working",
+    "content": "Verify marketing portal screenshot - DONE (5 accounts active)",
+    "status": "completed"
+  },
+  {
+    "content": "Update PRD.md - DONE",
+    "status": "completed"
+  },
+  {
+    "content": "Buat NEXT_AGENT_INSTRUCTIONS.md - DONE",
+    "status": "completed"
+  },
+  {
+    "content": "Buat GAP_ANALYSIS_REPORT_STATUS_UPDATE.md - DONE",
     "status": "completed"
   }
 ]

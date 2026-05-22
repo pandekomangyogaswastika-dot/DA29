@@ -222,3 +222,128 @@ Lihat `/app/memory/PRODUCTION_MAKLON_DEVELOPMENT_PLAN.md`
 
 ## Test Credentials
 - admin@garment.com / Admin@123
+
+---
+
+## 🔥 2026-05-22 Session — DEEP FORENSIC AUDIT + P0 QUICK WINS + P2 GAP
+
+### Audit Forensik 12-Lens (SELESAI)
+12 deliverables tersimpan di `/app/FORENSIC_00*.md` sampai `/app/FORENSIC_11*.md`:
+- `FORENSIC_00_EXECUTIVE_SUMMARY.md` — Top 10 findings + skor per dimensi
+- `FORENSIC_01_INVENTORY_BASELINE.md` — 194 routes, 270 components, 280+ collections
+- `FORENSIC_02_DEPENDENCY_GRAPH.md` — Menu→Route→Component→API→DB trace
+- `FORENSIC_03_BUSINESS_PROCESS_MAP.md` — 10 E2E flows (P2P, O2C, M2S, Maklon, CMT, H2R, Asset, Marketing, Opname, Accessory)
+- `FORENSIC_04_DATA_ARCHITECTURE.md` — 12 cluster DB consolidation plan
+- `FORENSIC_05_UX_EFFICIENCY_REPORT.md` — Cognitive load, click depth, friction
+- `FORENSIC_06_DESIGN_SYSTEM_AUDIT.md` — UI consistency findings
+- `FORENSIC_07_INFORMATION_ARCHITECTURE.md` — Sidebar restructure (before/after)
+- `FORENSIC_08_DEAD_CODE_INVENTORY.md` — Files/routes/collections untuk dihapus
+- `FORENSIC_09_CONSOLIDATION_PLAN.md` — 14 konsolidasi konkret
+- `FORENSIC_10_FUTURE_STATE_ARCHITECTURE.md` — Target DDD 8 bounded contexts
+- `FORENSIC_11_MIGRATION_ROADMAP.md` — Eksekusi P0→P3 (438 jam total, 54 hari kerja)
+
+### Keputusan Bisnis User (APPROVED)
+1. ✅ SSOT Aksesoris = `rahaza_materials` (with type='accessory')
+2. ✅ Deprecate `dewi_maklon_orders` → use `dewi_maklon_pos`
+3. ✅ Migrate legacy `dewi_toko_*` → `marketing_*`, lalu hapus
+4. ✅ Broken menus: 2 fix (`prod-rework-board`, `prod-alert-settings`), 2 hapus (`maklon-cmt`, `maklon-packing`)
+5. ✅ Mulai dari P0 Quick Wins
+
+### P0 — QUICK WINS (SELESAI ✅)
+**File modified:** `PortalShell.jsx`, `moduleRegistry.js`  
+**Files deleted:** `RahazaHPPModule.jsx.backup`, `HRDashboardPlaceholder.jsx`, `ProductionDashboardPlaceholder.jsx`
+
+Tasks completed:
+- [x] Fix `prod-rework-board` → mapped ke `BundleReworkBoard`
+- [x] Fix `prod-alert-settings` → mapped ke `RahazaAlertSettingsModule` (VERIFIED working)
+- [x] Hapus `maklon-cmt` dari sidebar Maklon + alias redirect → `prod-cmt`
+- [x] Hapus `maklon-packing` dari sidebar Maklon + alias redirect → `prod-cmt-packing`
+- [x] Hapus `maklon-orders` (legacy) → redirect ke `maklon-po`
+- [x] Move `cmt-progress` dari Maklon → Production portal (CMT & Sub-Proses)
+- [x] Hapus `toko-channels` dan `toko-pricing` dari sidebar Marketing
+- [x] Hapus duplikat `wh-accessory-master` dan `wh-accessory-stock` dari Gudang
+- [x] Hapus header section "Aksesoris & Finishing" di Gudang (sudah redundant)
+- [x] Cleanup 25+ badge "BARU" yang clutter sidebar
+- [x] Cleanup badge technical "P0", "P1" leak ke UI
+- [x] Hapus 3 file backup/placeholder orphan
+
+**Impact:**
+- Broken menus: 4 → 0
+- Duplicate sidebar items: 5 → 0
+- Badge "BARU" clutter: 25+ → 0
+- Portal Maklon items: 14 → 10 (-29%)
+- Portal Gudang items: 24 → 21 (-13%)
+- Zero data risk, all lint clean
+
+### P2 — GAP ITEMS (SELESAI ✅)
+**Discovery:** Saat audit forensik, sebagian besar GAP items dari `GAP_ANALYSIS_REPORT.md` ternyata **SUDAH IMPLEMENTED** di session sebelumnya (file outdated):
+- ✅ **Communication Hub:** File upload (POST /api/comm/channels/{id}/upload), Edit message (PATCH /api/comm/messages/{id}), Delete message (DELETE /api/comm/messages/{id}), Pin/Unpin, Threads, Reactions — semua working
+- ✅ **Asset Management:** Transfer asset (POST /api/assets/{id}/transfer), Photo upload (POST /api/assets/{id}/upload-photo), Maintenance schedule — semua working
+- ✅ **My Workspace:** Spreadsheet editor (DataGrid), Auto-save, Share dialog, Permissions, Version history, Excel import, Cell formatting, Formula bar — P0-P5 features all done
+
+**Yang baru di-execute:** Marketing Seed Data
+- File: `/app/backend/scripts/seed_marketing_demo.py`
+- Seeded: 5 platform accounts (Shopee, TikTok, Tokopedia, Instagram, Lazada), 10 catalog items, 6 KOL creators (Macro/Mid/Micro), 150 daily sales records (30 hari × 5 platform), 5 monthly targets, 50 marketing orders
+- Marketing Dashboard sekarang menampilkan 5 Active Accounts dengan health metrics
+
+---
+
+## 🚧 BACKLOG TERSISA (untuk Agent Selanjutnya)
+
+### P1 — DATA CONSOLIDATION (HIGH IMPACT, MEDIUM RISK)
+Lihat detail lengkap di `/app/FORENSIC_11_MIGRATION_ROADMAP.md`
+
+#### P1.A — Accessory Consolidation (~25 jam)
+- Migrate `acc_items` → `rahaza_materials` (type='accessory')
+- Migrate `acc_stock_movements` → `rahaza_material_movements`
+- Migrate `acc_opname_*` → `wh_opname2_*`
+- Keep specialized: `acc_loans`, `acc_purchase_requests`, `acc_internal_requests`
+- Update backend routes + frontend `AccessoryModule.jsx`
+
+#### P1.B — Maklon Orders Consolidation (~12 jam)
+- Deprecate `dewi_maklon_orders` (lama)
+- Use `dewi_maklon_pos` sebagai SSOT
+- Identify all production endpoints reading from old DB
+- Migration script + monitoring
+
+#### P1.C — P2P Flow Completion (~14 jam)
+- Implement "Create GR from PO" backend endpoint
+- Frontend button + auto-prefill
+- Status cascade PO → GR → Invoice
+
+#### P1.D — Legacy Toko Migration (~18 jam)
+- 8 collections `dewi_toko_*` → migrate to `marketing_*`
+- Delete legacy collections after monitoring 1 week
+
+### P2 — WORKFLOW CONSOLIDATION (~180 jam)
+14 konsolidasi konkret di `FORENSIC_09_CONSOLIDATION_PLAN.md`:
+1. Aksesoris SSOT (3→1)
+2. Cutting Plan+Exec (2→1 dengan tab)
+3. Stok & Master tab (5→2)
+4. Opname unified (3→1)
+5. **Maklon PO 360° View (6→1)** — high UX win
+6. **HR Approval Inbox** (5→1) — high UX win
+7. **Production Control Tower** (4→1) — high UX win
+8. Marketing Reports Hub (5→1)
+9. Komplain & Return (2→1)
+10. Marketing Task Hub (3→1)
+11. CMT to Production (relocate)
+12. Shipping clear flows (4→2)
+13. Production Workspace Master (4→1)
+14. KPI & Performance (4→2)
+
+### P3 — ARCHITECTURE LONG-TERM (~120 jam)
+- Notification unification
+- Counter unification
+- Performance/KPI cleanup
+- KOL unification
+- Warehouse Gen 1 cleanup
+- Search enhancement
+- Design system standardization
+- Global Workspace Dashboard
+- Naming convention phase-out
+
+### Marketing Dashboard Polish (P1 dari sebelumnya, masih relevan)
+- AccountCard "Lihat Dashboard" navigate to detail
+- Revenue Chart filter per-akun
+- Halaman detail per-akun (sales history, orders, health, KOL, LiveHost)
