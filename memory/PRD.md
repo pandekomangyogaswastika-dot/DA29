@@ -8,6 +8,74 @@
 
 **Jangan skip pembacaan di atas — sistem ini punya history technical debt yang harus dihindari di session berikutnya.**
 
+
+---
+
+## 🆕 2026-05-22 Session — P1.A Accessory Consolidation (SELESAI ✅)
+
+### Goal
+Konsolidasi 4 sistem aksesoris paralel menjadi 1 SSOT (FORENSIC_04 Cluster 1).
+
+### Approach: API-Stable, SSOT-Internal Refactor
+Endpoint `/api/acc/*` TIDAK BERUBAH dari sisi frontend. Backend di-refactor untuk pakai:
+- `rahaza_materials` (filter `type='accessory'`) sebagai master SSOT
+- `rahaza_material_stock` (location-aware) untuk saldo stok
+- `rahaza_material_movements` (filter `domain='accessory'`) untuk histori movements
+- Default location: `ZNA-AKSESORIS` (auto-create kalau missing)
+
+### Files Affected
+- **REFACTORED**: `/app/backend/routes/dewi_accessories_full.py` (736 → 681 lines, semua endpoint pakai SSOT internal)
+- **NEW**: `/app/backend/migrations/poc_accessory_ssot.py` (POC verifikasi 6 user stories — PASS 100%)
+- **NEW**: `/app/backend/migrations/migrate_accessories.py` (idempotent migration acc_* → rahaza_*, dry-run + execute)
+- **NEW**: `/app/backend/migrations/__init__.py`
+
+### Specialized Features Preserved (NOT migrated, unique business value)
+- `acc_internal_requests` — Request aksesoris dari divisi internal
+- `acc_loans` — Peminjaman aksesoris
+- `acc_purchase_requests` — PR ke finance (specific accessory workflow)
+- `acc_opname_sessions` + `acc_opname_lines` — Akan dipindah ke `wh_opname2_*` di task terpisah
+
+Semua side-effect stok dari fitur di atas sekarang ditulis ke SSOT (`rahaza_material_movements` + `rahaza_material_stock`).
+
+### Migration Results (executed 2026-05-22)
+- 2 legacy `acc_items` → migrated ke `rahaza_materials` (type='accessory')
+- 4 legacy `acc_stock_movements` → migrated ke `rahaza_material_movements` (domain='accessory')
+- 3 material stock totals recomputed correctly:
+  - LEGACY-ACC-001 (Kancing Resleting): 500-50 = **450 pcs** ✅
+  - LEGACY-ACC-002 (Benang Jahit): 25+2 = **27 rol** ✅
+  - POC item: 10-3 = **7 pcs** ✅
+- Legacy collections NOT dropped (preserved for monitoring 1 week per protocol)
+
+### Testing Results (testing_agent_v3 iteration_15)
+- **29/29 backend tests PASS (100%)**
+- All `/api/acc/*` endpoints verified working
+- Items, Stock receive/issue, Internal Requests, Loans, Purchase Requests, Opname, Dashboard — all working with SSOT backing
+
+### Database State After
+- `rahaza_materials` filter type='accessory' active=true: **8 items** (2 migrated legacy + 6 created in tests)
+- `rahaza_material_movements` filter domain='accessory': **multiple** with proper IN/OUT/ADJUST/LOAN_OUT/LOAN_RETURN legacy types
+- `acc_items` legacy: 2 docs (preserved, no longer read by routes)
+- `acc_stock_movements` legacy: 4 docs (preserved, no longer read by routes)
+
+### Decisions Made
+- SSOT untuk aksesoris = `rahaza_materials` (confirmed by user 22 Mei 2026, executed today)
+- Use single default location `ZNA-AKSESORIS` for accessory stock instead of multi-location complexity
+- Preserve `legacy_movement_type` field in new movements for frontend back-compat
+- Movement schema includes `domain='accessory'` for easy filtering vs other material movements
+
+### Tech Debt Addressed
+- [DONE] Removed dependency on duplicate `acc_items` / `acc_stock_movements` SSOT
+- [REMAINING] `acc_opname_*` → `wh_opname2_*` migration (separate task, FORENSIC_04 Cluster B)
+- [REMAINING] Eventually drop legacy collections after 1-week monitoring (separate cleanup task)
+
+### Next Action Items (Recommended for Incoming Agent)
+1. **P1.B Maklon Orders Consolidation** (~12 jam): deprecate `dewi_maklon_orders` → `dewi_maklon_pos`
+2. **P1.C P2P Flow Completion** (~14 jam): implement "Create GR from PO"
+3. **P1.D Legacy Toko Migration** (~18 jam): 8 collections `dewi_toko_*` → `marketing_*`
+4. **Cleanup P1.A** (after 1 week monitoring): drop `acc_items` & `acc_stock_movements` legacy collections
+5. **acc_opname → wh_opname2 migration** (related to P1.A but separate scope)
+
+
 ---
 
 ## Original Problem Statement

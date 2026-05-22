@@ -32,11 +32,11 @@
     "status": "completed"
   },
   {
-    "content": "Phase 4: Testing dengan testing_agent_v3 - end-to-end accessory flow (items, stock, IR, loans, opname, PR)",
-    "status": "in_progress"
+    "content": "Phase 4: Testing dengan testing_agent_v3 - PASS 29/29 backend tests",
+    "status": "completed"
   },
   {
     "content": "Update PRD.md dan plan.md dengan progress P1.A",
-    "status": "pending"
+    "status": "completed"
   }
 ]
