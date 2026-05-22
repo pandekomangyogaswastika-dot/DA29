@@ -1,0 +1,143 @@
+{
+  "summary": "Completed Phase 6 Fulfillment Module testing. Backend APIs are fully functional (16/16 tests passed). Full fulfillment flow works: allocate → pick → pack → dispatch. Stock reduction verified. CRITICAL FRONTEND ISSUE: Fulfillment module is not accessible from the UI sidebar - the 'OPERASIONAL GUDANG' section is not rendering, preventing users from accessing the Fulfillment module.",
+  
+  "backend_issues": {
+    "critical_bugs": [],
+    "flaky_endpoints": [],
+    "warnings": [
+      {
+        "endpoint": "POST /api/fulfillment/orders/{id}/dispatch",
+        "issue": "COGS posting fails when no HPP snapshot exists for Work Orders",
+        "impact": "COGS not posted to GL for test orders without proper WO setup",
+        "fix_priority": "LOW",
+        "note": "This is expected behavior - error is handled gracefully and stored in order.cogs_error field"
+      }
+    ]
+  },
+  
+  "frontend_issues": {
+    "critical_bugs": [
+      {
+        "component": "PortalShell.jsx - Warehouse Sidebar Navigation",
+        "issue": "Fulfillment module link not visible in sidebar - 'OPERASIONAL GUDANG' section not rendering",
+        "selector": "text=Fulfillment (Order → FG Out)",
+        "fix_priority": "CRITICAL",
+        "impact": "Users cannot access Fulfillment module from UI",
+        "details": "Module is registered in moduleRegistry.js and PortalShell.jsx (line 292) but sidebar only shows 'INVENTORI' section, not 'OPERASIONAL GUDANG' section",
+        "workaround": "Direct URL navigation (?module=fulfillment) also fails - shows Warehouse Dashboard instead"
+      }
+    ],
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  
+  "passed_tests": [
+    "Backend: Admin login (200 OK)",
+    "Backend: Create CMT Receipt for FG stock generation",
+    "Backend: Add receipt lines (FUL-SKU-001, FUL-SKU-002)",
+    "Backend: Update line quantities (100 pcs, 150 pcs)",
+    "Backend: Submit CMT receipt",
+    "Backend: Approve CMT receipt → FG created in rahaza_material_stock (category=fg_internal, ownership=cv_da)",
+    "Backend: GET /api/fulfillment/summary - Returns stats (Pending=1, Allocated=0, Picking=0, Packed=0, Dispatched Today=0)",
+    "Backend: GET /api/fulfillment/queue - Returns 1 order (MKT-TEST-20260522152717)",
+    "Backend: GET /api/fulfillment/inventory/available - Returns 3 FG items (FUL-SKU-001: 200 pcs, FUL-SKU-002: 300 pcs, TEST-SKU-001: 50 pcs)",
+    "Backend: POST /api/fulfillment/orders/{id}/allocate - Allocated 2 items successfully",
+    "Backend: POST /api/fulfillment/orders/{id}/pick - Picking started",
+    "Backend: POST /api/fulfillment/orders/{id}/pack - Packing confirmed",
+    "Backend: POST /api/fulfillment/orders/{id}/dispatch - Order dispatched (Shipment: FUL-MKT-TEST-20260522152717)",
+    "Backend: Stock reduction verified - reserved_quantity increased, available_quantity decreased during allocation",
+    "Backend: Stock reduction verified - quantity decreased during dispatch",
+    "Backend: Material movements logged in rahaza_material_movements collection"
+  ],
+  
+  "test_report_links": [
+    "/app/backend/backend_test.py",
+    "/app/backend/create_test_order.py",
+    "/root/.emergent/automation_output/20260522_152928/console_20260522_152928.log"
+  ],
+  
+  "success_percentage": {
+    "backend": "100% (16/16 tests passed)",
+    "frontend": "0% (module not accessible)",
+    "overall": "50% (backend working, frontend blocked)"
+  },
+  
+  "updated_files": [
+    "/app/backend/backend_test.py",
+    "/app/backend/create_test_order.py"
+  ],
+  
+  "action_item_for_main_agent": "CRITICAL: Fix frontend sidebar navigation - Fulfillment module is not accessible from UI. The 'OPERASIONAL GUDANG' section in PortalShell.jsx (line 288-301) is not rendering in the sidebar. Module is registered correctly in moduleRegistry.js and PortalShell.jsx but not visible to users. Investigate why warehouse sidebar sections are not displaying properly. All backend APIs are working perfectly.",
+  
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_test_itself": false,
+  
+  "detailed_findings": {
+    "phase_6_fulfillment_backend": {
+      "status": "FULLY WORKING",
+      "backend_apis": {
+        "GET /api/fulfillment/summary": "✅ Working - Returns dashboard stats (pending, allocated, picking, packed, dispatched_today)",
+        "GET /api/fulfillment/queue": "✅ Working - Returns orders filtered by fulfillment_status",
+        "GET /api/fulfillment/orders/{id}": "✅ Working - Returns order detail with fulfillment info",
+        "GET /api/fulfillment/inventory/available": "✅ Working - Returns FG stock (ownership=cv_da, inventory_category=fg_internal, available_quantity>0)",
+        "POST /api/fulfillment/orders/{id}/allocate": "✅ Working - Allocates FG stock, reserves quantity, updates order status to 'allocated'",
+        "POST /api/fulfillment/orders/{id}/pick": "✅ Working - Updates order status to 'picking'",
+        "POST /api/fulfillment/orders/{id}/pack": "✅ Working - Updates order status to 'packed_ready'",
+        "POST /api/fulfillment/orders/{id}/dispatch": "✅ Working - Reduces stock, creates shipment, posts COGS (if HPP available), updates order status to 'dispatched'"
+      },
+      "stock_integration": {
+        "collection": "rahaza_material_stock",
+        "allocate_behavior": "✅ Decreases available_quantity, increases reserved_quantity",
+        "dispatch_behavior": "✅ Decreases quantity and reserved_quantity, logs movement in rahaza_material_movements",
+        "idempotency": "✅ Proper status checks prevent duplicate operations"
+      },
+      "cogs_integration": {
+        "status": "⚠️ PARTIAL",
+        "implementation": "Uses post_cogs_shipment from rahaza_posting.py",
+        "success_condition": "Requires HPP snapshots for Work Orders in shipment items",
+        "failure_handling": "✅ Graceful - error stored in order.cogs_error field, dispatch continues",
+        "test_result": "COGS posting failed for test data (expected - no HPP snapshot)"
+      }
+    },
+    "phase_6_fulfillment_frontend": {
+      "status": "NOT ACCESSIBLE",
+      "registration": {
+        "moduleRegistry.js": "✅ Registered as 'fulfillment' → FulfillmentModule",
+        "PortalShell.jsx": "✅ Registered in warehouse portal, line 292: { id: 'fulfillment', label: 'Fulfillment (Order → FG Out)', icon: Send, badge: 'BARU' }",
+        "section": "OPERASIONAL GUDANG (lines 288-301)"
+      },
+      "sidebar_issue": {
+        "problem": "❌ 'OPERASIONAL GUDANG' section not rendering in sidebar",
+        "visible_sections": "Only 'INVENTORI' section visible (Dashboard Gudang, Bahan Baku & Material, Aksesoris & Finishing, Produk Jadi (FG))",
+        "missing_sections": "'OPERASIONAL GUDANG' section (which contains Fulfillment, PO, GRN, Put-Away, Pick List, etc.)",
+        "impact": "Users cannot access Fulfillment module or other operational warehouse features"
+      },
+      "direct_url_test": {
+        "url_tested": "?module=fulfillment",
+        "result": "❌ Shows Warehouse Dashboard instead of Fulfillment module",
+        "conclusion": "Module routing may also have issues"
+      }
+    },
+    "test_data_created": {
+      "fg_stock": [
+        "FG-FUL-SKU-001: Kemeja Biru L (200 pcs available)",
+        "FG-FUL-SKU-002: Kemeja Merah M (300 pcs available)",
+        "FG-TEST-SKU-001: Test Product FG (50 pcs available)"
+      ],
+      "marketing_order": {
+        "order_id": "MKT-TEST-20260522152717",
+        "customer": "Test Customer Fulfillment",
+        "product": "Kemeja Biru L",
+        "quantity": 50,
+        "fulfillment_status": "dispatched (after full flow test)",
+        "tracking_number": "JNE20260522152717"
+      }
+    }
+  },
+  
+  "screenshots": [
+    ".screenshots/fulfillment-sidebar.png",
+    ".screenshots/fulfillment-page-v2.png"
+  ]
+}
