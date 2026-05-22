@@ -1,33 +1,41 @@
 """
-Aksesoris Management — Full Implementation (Blueprint §3.3)
+Aksesoris Management — SSOT-backed implementation (P1.A consolidation, 2026-05-22).
 
-Collections:
-  acc_items               — Master aksesoris
-  acc_stock_movements     — Pergerakan stok (IN/OUT/ADJUST)
-  acc_internal_requests   — Request dari divisi internal
-  acc_loans               — Peminjaman aksesoris
-  acc_opname_sessions     — Sesi stok opname
-  acc_opname_lines        — Detail baris opname
-  acc_purchase_requests   — Purchase Request ke Finance
+API CONTRACT UNCHANGED. Frontend `/api/acc/*` endpoints tetap berfungsi sama.
 
-Endpoints:
-  GET/POST       /api/acc/items
-  PUT/DELETE     /api/acc/items/{id}
-  GET            /api/acc/stock
-  POST           /api/acc/stock/receive   (terima stok masuk)
-  POST           /api/acc/stock/issue     (keluarkan stok)
-  GET            /api/acc/internal-requests
-  POST           /api/acc/internal-requests
-  PUT            /api/acc/internal-requests/{id}
-  GET/POST       /api/acc/loans
-  PUT            /api/acc/loans/{id}/return
-  GET/POST       /api/acc/opname
-  PUT            /api/acc/opname/{id}
-  POST           /api/acc/opname/{id}/complete
-  POST           /api/acc/opname/{id}/cancel
-  GET/POST       /api/acc/purchase-requests
-  PUT            /api/acc/purchase-requests/{id}
-  GET            /api/acc/dashboard        (summary)
+INTERNAL CHANGES:
+    Old (legacy)              -> New (SSOT)
+    -----------               -----------
+    acc_items                 -> rahaza_materials (filter type='accessory')
+    acc_stock_movements       -> rahaza_material_movements (filter material.type='accessory')
+    (sum of qty_signed)       -> rahaza_material_stock (location-aware running totals)
+
+PRESERVED (specialized features, not duplicates):
+    acc_internal_requests     (request dari divisi internal)
+    acc_loans                 (peminjaman aksesoris)
+    acc_purchase_requests     (PR ke finance untuk aksesoris)
+    acc_opname_sessions       (akan dipindah ke wh_opname2 di task terpisah)
+    acc_opname_lines
+
+Endpoints (semuanya tetap):
+    GET/POST       /api/acc/items
+    PUT/DELETE     /api/acc/items/{id}
+    GET            /api/acc/stock
+    POST           /api/acc/stock/receive   (terima stok masuk)
+    POST           /api/acc/stock/issue     (keluarkan stok)
+    GET            /api/acc/stock/movements
+    GET            /api/acc/internal-requests
+    POST           /api/acc/internal-requests
+    PUT            /api/acc/internal-requests/{id}
+    GET/POST       /api/acc/loans
+    PUT            /api/acc/loans/{id}/return
+    GET/POST       /api/acc/opname
+    PUT            /api/acc/opname/{id}/count
+    POST           /api/acc/opname/{id}/complete
+    POST           /api/acc/opname/{id}/cancel
+    GET/POST       /api/acc/purchase-requests
+    PUT            /api/acc/purchase-requests/{id}
+    GET            /api/acc/dashboard
 """
 
 from fastapi import APIRouter, HTTPException, Request
@@ -38,59 +46,234 @@ from datetime import datetime, timezone
 from database import get_db
 from auth import require_auth, serialize_doc
 
-router = APIRouter(prefix="/api/acc", tags=["accessories-full"])
+router = APIRouter(prefix="/api/acc", tags=["accessories"])
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 def _id():    return str(uuid.uuid4())
-def _now():   return datetime.now(timezone.utc).isoformat()
-def _uid():   return str(uuid.uuid4())[:8].upper()
+def _now_iso(): return datetime.now(timezone.utc).isoformat()
+def _now():   return datetime.now(timezone.utc)
 
 
-async def _stock_qty(db, acc_id: str) -> float:
-    """Hitung saldo stok saat ini untuk satu item dari movements."""
+# Allowed units for accessories (subset of MATERIAL_UNITS in rahaza_inventory).
+# We auto-normalize to lowercase. Defaults to 'pcs' if invalid.
+_VALID_UNITS = {
+    "m", "cm", "yard", "inch",
+    "kg", "gram", "ton",
+    "pcs", "lusin", "kodi", "gross", "helai", "set", "pair",
+    "rol", "gulung", "bal", "karton", "pak", "sak",
+    "liter", "ml",
+}
+
+
+def _normalize_unit(unit: str) -> str:
+    """Map common labels to the canonical MATERIAL_UNITS values."""
+    if not unit:
+        return "pcs"
+    u = str(unit).strip().lower()
+    aliases = {
+        "piece": "pcs", "pieces": "pcs", "buah": "pcs",
+        "meter": "m", "centimeter": "cm",
+        "kilogram": "kg", "gr": "gram", "grams": "gram",
+        "pasang": "pair", "set/pair": "set",
+        "rolls": "rol", "roll": "rol",
+        "pack": "pak", "packs": "pak",
+        "karton/dus": "karton", "dus": "karton",
+    }
+    u = aliases.get(u, u)
+    return u if u in _VALID_UNITS else "pcs"
+
+
+async def _get_accessory_location_id(db) -> str:
+    """Return id of the default 'Area Aksesoris' location (ZNA-AKSESORIS).
+    Auto-create if missing (idempotent).
+    """
+    loc = await db.rahaza_locations.find_one(
+        {"code": "ZNA-AKSESORIS"}, {"_id": 0, "id": 1}
+    )
+    if loc:
+        return loc["id"]
+    new_id = _id()
+    await db.rahaza_locations.insert_one({
+        "id": new_id,
+        "code": "ZNA-AKSESORIS",
+        "name": "Area Aksesoris",
+        "type": "zona",
+        "created_at": _now(),
+        "updated_at": _now(),
+    })
+    return new_id
+
+
+# ── STOCK helpers (SSOT: rahaza_material_stock) ──────────────────────────────
+
+async def _stock_qty(db, material_id: str) -> float:
+    """Total stock across all locations for one accessory material."""
     pipeline = [
-        {"$match": {"acc_id": acc_id}},
-        {"$group": {"_id": None, "total": {"$sum": "$qty_signed"}}}
+        {"$match": {"material_id": material_id}},
+        {"$group": {"_id": None, "total": {"$sum": "$qty"}}},
     ]
-    res = await db.acc_stock_movements.aggregate(pipeline).to_list(1)
-    return res[0]["total"] if res else 0.0
+    res = await db.rahaza_material_stock.aggregate(pipeline).to_list(1)
+    return float(res[0]["total"]) if res else 0.0
 
 
-async def _all_stock(db) -> dict:
-    """Return {acc_id: qty} untuk semua item."""
+async def _all_accessory_stock(db) -> dict:
+    """Return {material_id: total_qty} for ALL accessory-type materials.
+
+    Uses $lookup so we only count stock rows whose material.type='accessory'.
+    """
     pipeline = [
-        {"$group": {"_id": "$acc_id", "total": {"$sum": "$qty_signed"}}}
+        {"$lookup": {
+            "from": "rahaza_materials",
+            "localField": "material_id",
+            "foreignField": "id",
+            "as": "_mat",
+        }},
+        {"$unwind": "$_mat"},
+        {"$match": {"_mat.type": "accessory"}},
+        {"$group": {"_id": "$material_id", "total": {"$sum": "$qty"}}},
     ]
-    res = await db.acc_stock_movements.aggregate(pipeline).to_list(500)
-    return {r["_id"]: r["total"] for r in res}
+    res = await db.rahaza_material_stock.aggregate(pipeline).to_list(5000)
+    return {r["_id"]: float(r["total"]) for r in res}
+
+
+async def _add_stock(db, material_id: str, location_id: str, delta: float):
+    """Idempotent upsert + increment, mirrors rahaza_inventory._add_stock."""
+    await db.rahaza_material_stock.update_one(
+        {"material_id": material_id, "location_id": location_id},
+        {
+            "$inc": {"qty": float(delta)},
+            "$setOnInsert": {"id": _id()},
+            "$set": {"updated_at": _now()},
+        },
+        upsert=True,
+    )
+
+
+async def _log_movement(db, user: dict, *, material_id: str, mv_type: str, qty: float,
+                        from_loc: str | None, to_loc: str | None,
+                        ref_type: str = "", ref_id: str = "", ref_number: str = "",
+                        notes: str = "", legacy_type: str = "") -> dict:
+    """Append a row to rahaza_material_movements.
+
+    `mv_type` ∈ {'receive','issue','transfer','adjust'} (rahaza canonical types).
+    `legacy_type` is the original acc_* movement_type label kept for compatibility
+    (e.g. 'IN','OUT','LOAN_OUT','LOAN_RETURN','ADJUST') so /movements endpoint can
+    return the same label the frontend already understands.
+    """
+    ts = _now()
+    doc = {
+        "id": _id(),
+        "type": mv_type,
+        "material_id": material_id,
+        "qty": float(qty),
+        "from_location_id": from_loc,
+        "to_location_id": to_loc,
+        "ref_type": ref_type,
+        "ref_id": ref_id,
+        "ref_number": ref_number,
+        "notes": notes,
+        "legacy_movement_type": legacy_type or mv_type.upper(),
+        "domain": "accessory",
+        "created_at": ts,
+        "timestamp": ts,
+        "created_by": user.get("id") or user.get("name") or "",
+        "created_by_name": user.get("name", ""),
+    }
+    await db.rahaza_material_movements.insert_one(doc)
+    return doc
+
+
+async def _enrich_movement(db, mv: dict) -> dict:
+    """Add acc_id / acc_name / qty_signed / movement_type back-compat fields."""
+    mid = mv.get("material_id")
+    name = ""
+    if mid:
+        m = await db.rahaza_materials.find_one({"id": mid}, {"_id": 0, "name": 1, "code": 1})
+        if m:
+            name = m.get("name", "")
+    legacy = (mv.get("legacy_movement_type") or "").upper()
+    if not legacy:
+        # derive from canonical type if legacy missing
+        t = (mv.get("type") or "").lower()
+        legacy = {"receive": "IN", "issue": "OUT", "adjust": "ADJUST", "transfer": "TRANSFER"}.get(t, t.upper())
+
+    qty = float(mv.get("qty") or 0)
+    # qty_signed convention (legacy): IN/RETURN positive, OUT/LOAN_OUT negative, ADJUST signed
+    if legacy in ("IN", "LOAN_RETURN"):
+        qty_signed = abs(qty)
+    elif legacy in ("OUT", "LOAN_OUT"):
+        qty_signed = -abs(qty)
+    elif legacy == "ADJUST":
+        qty_signed = qty  # already signed
+    else:
+        qty_signed = qty
+
+    return {
+        "id": mv.get("id"),
+        "acc_id": mid,
+        "acc_name": name,
+        "material_id": mid,
+        "movement_type": legacy,
+        "qty_signed": qty_signed,
+        "qty": qty,
+        "ref_type": mv.get("ref_type", ""),
+        "ref_id": mv.get("ref_id", ""),
+        "ref_number": mv.get("ref_number", ""),
+        "notes": mv.get("notes", ""),
+        "created_by": mv.get("created_by_name") or mv.get("created_by") or "",
+        "created_at": mv.get("created_at"),
+    }
+
+
+def _material_to_acc_item(mat: dict, stock_qty: float = 0.0) -> dict:
+    """Project rahaza_materials doc into the legacy acc_items shape."""
+    if not mat:
+        return {}
+    min_stock = float(mat.get("min_stock") or 0)
+    out = {
+        "id": mat.get("id"),
+        "code": mat.get("code", ""),
+        "name": mat.get("name", ""),
+        "category": mat.get("category") or "Umum",
+        "unit": mat.get("unit", "pcs"),
+        "description": mat.get("description", ""),
+        "min_stock": min_stock,
+        "supplier": mat.get("supplier", ""),
+        "notes": mat.get("notes", ""),
+        "deleted": not mat.get("active", True),
+        "created_by": mat.get("created_by", ""),
+        "created_at": mat.get("created_at"),
+        "updated_at": mat.get("updated_at"),
+        "stock_qty": float(stock_qty),
+        "stock_status": (
+            "out" if stock_qty <= 0
+            else "low" if stock_qty <= min_stock and min_stock > 0
+            else "ok"
+        ),
+    }
+    return out
 
 
 # ═══════════════════════════════════════════════════════════════
-# MASTER AKSESORIS
+# MASTER AKSESORIS (rahaza_materials with type='accessory')
 # ═══════════════════════════════════════════════════════════════
 
 @router.get("/items")
 async def list_items(request: Request):
-    user = await require_auth(request)
+    await require_auth(request)
     db = get_db()
     sp = request.query_params
-    query = {"deleted": {"$ne": True}}
+    query: dict = {"type": "accessory", "active": True}
     if sp.get("search"):
         import re
-        rx = re.compile(sp["search"], re.IGNORECASE)
+        rx = re.compile(re.escape(sp["search"]), re.IGNORECASE)
         query["$or"] = [{"name": rx}, {"code": rx}, {"category": rx}]
     if sp.get("category"):
         query["category"] = sp["category"]
 
-    items = await db.acc_items.find(query, {"_id": 0}).sort("name", 1).to_list(500)
-    stock_map = await _all_stock(db)
-    for it in items:
-        it["stock_qty"] = stock_map.get(it["id"], 0)
-        it["stock_status"] = (
-            "out" if it["stock_qty"] <= 0
-            else "low" if it["stock_qty"] <= it.get("min_stock", 0)
-            else "ok"
-        )
+    mats = await db.rahaza_materials.find(query, {"_id": 0}).sort("name", 1).to_list(2000)
+    stock_map = await _all_accessory_stock(db)
+    items = [_material_to_acc_item(m, stock_map.get(m["id"], 0.0)) for m in mats]
     return serialize_doc(items)
 
 
@@ -99,86 +282,136 @@ async def create_item(request: Request):
     user = await require_auth(request)
     db = get_db()
     body = await request.json()
-    if not body.get("name"):
+    name = (body.get("name") or "").strip()
+    if not name:
         raise HTTPException(400, "name wajib diisi")
 
-    seq = (await db.acc_items.count_documents({"deleted": {"$ne": True}})) + 1
-    code = body.get("code") or f"ACC-{str(seq).zfill(4)}"
+    seq = (await db.rahaza_materials.count_documents({"type": "accessory"})) + 1
+    code = (body.get("code") or f"ACC-{str(seq).zfill(4)}").strip().upper()
+
+    # Duplicate code guard (only within accessory namespace + active)
+    if await db.rahaza_materials.find_one({"code": code, "type": "accessory", "active": True}):
+        raise HTTPException(409, f"Kode '{code}' sudah terpakai untuk aksesoris.")
+
+    unit = _normalize_unit(body.get("unit") or "pcs")
     doc = {
-        "id": _id(), "code": code, "name": body["name"],
-        "category": body.get("category", "Umum"),
-        "unit": body.get("unit", "pcs"),
+        "id": _id(),
+        "code": code,
+        "name": name,
+        "type": "accessory",
+        "unit": unit,
+        "category": (body.get("category") or "Umum"),
         "description": body.get("description", ""),
-        "min_stock": float(body.get("min_stock", 0)),
+        "min_stock": float(body.get("min_stock") or 0),
         "supplier": body.get("supplier", ""),
         "notes": body.get("notes", ""),
-        "deleted": False,
-        "created_by": user["name"], "created_at": _now(), "updated_at": _now()
+        "active": True,
+        "created_by": user.get("name", ""),
+        "created_at": _now_iso(),
+        "updated_at": _now_iso(),
     }
-    await db.acc_items.insert_one(doc)
-    doc["stock_qty"] = 0
-    doc["stock_status"] = "out"
-    return JSONResponse(serialize_doc(doc), status_code=201)
+    await db.rahaza_materials.insert_one(doc)
+    out = _material_to_acc_item(doc, 0.0)
+    return JSONResponse(serialize_doc(out), status_code=201)
 
 
 @router.put("/items/{item_id}")
 async def update_item(item_id: str, request: Request):
-    user = await require_auth(request)
+    await require_auth(request)
     db = get_db()
     body = await request.json()
-    existing = await db.acc_items.find_one({"id": item_id, "deleted": {"$ne": True}})
+    existing = await db.rahaza_materials.find_one({"id": item_id, "type": "accessory"})
     if not existing:
-        raise HTTPException(404, "Item tidak ditemukan")
-    upd = {k: v for k, v in body.items() if k not in ("_id", "id", "created_at", "created_by")}
-    upd["updated_at"] = _now()
-    await db.acc_items.update_one({"id": item_id}, {"$set": upd})
-    result = await db.acc_items.find_one({"id": item_id}, {"_id": 0})
-    result["stock_qty"] = await _stock_qty(db, item_id)
-    return serialize_doc(result)
+        raise HTTPException(404, "Aksesoris tidak ditemukan")
+
+    upd: dict = {}
+    allowed = ("name", "category", "description", "supplier", "notes")
+    for k in allowed:
+        if k in body:
+            upd[k] = body[k]
+    if "code" in body and body["code"]:
+        upd["code"] = str(body["code"]).strip().upper()
+    if "unit" in body and body["unit"]:
+        upd["unit"] = _normalize_unit(body["unit"])
+    if "min_stock" in body:
+        try:
+            upd["min_stock"] = float(body["min_stock"] or 0)
+        except Exception:
+            upd["min_stock"] = 0.0
+    if "deleted" in body:
+        upd["active"] = not bool(body["deleted"])
+    upd["updated_at"] = _now_iso()
+
+    await db.rahaza_materials.update_one({"id": item_id}, {"$set": upd})
+    result = await db.rahaza_materials.find_one({"id": item_id}, {"_id": 0})
+    qty = await _stock_qty(db, item_id)
+    return serialize_doc(_material_to_acc_item(result, qty))
 
 
 @router.delete("/items/{item_id}")
 async def delete_item(item_id: str, request: Request):
-    user = await require_auth(request)
+    await require_auth(request)
     db = get_db()
-    await db.acc_items.update_one({"id": item_id}, {"$set": {"deleted": True, "updated_at": _now()}})
+    res = await db.rahaza_materials.update_one(
+        {"id": item_id, "type": "accessory"},
+        {"$set": {"active": False, "updated_at": _now_iso()}},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(404, "Aksesoris tidak ditemukan")
     return {"ok": True}
 
 
 # ═══════════════════════════════════════════════════════════════
-# STOK — MOVEMENTS & ADJUST
+# STOK — receive / issue / movements / overview
 # ═══════════════════════════════════════════════════════════════
 
 @router.get("/stock")
 async def get_stock_overview(request: Request):
-    user = await require_auth(request)
+    await require_auth(request)
     db = get_db()
-    items = await db.acc_items.find({"deleted": {"$ne": True}}, {"_id": 0}).sort("name", 1).to_list(500)
-    stock_map = await _all_stock(db)
+    mats = await db.rahaza_materials.find(
+        {"type": "accessory", "active": True}, {"_id": 0}
+    ).sort("name", 1).to_list(2000)
+    stock_map = await _all_accessory_stock(db)
     result = []
-    for it in items:
-        qty = stock_map.get(it["id"], 0)
+    for m in mats:
+        qty = float(stock_map.get(m["id"], 0))
+        min_stock = float(m.get("min_stock") or 0)
         result.append({
-            "id": it["id"], "code": it["code"], "name": it["name"],
-            "category": it["category"], "unit": it["unit"],
-            "stock_qty": qty, "min_stock": it.get("min_stock", 0),
-            "stock_status": ("out" if qty <= 0 else "low" if qty <= it.get("min_stock", 0) else "ok")
+            "id": m["id"],
+            "code": m.get("code", ""),
+            "name": m.get("name", ""),
+            "category": m.get("category", "Umum"),
+            "unit": m.get("unit", "pcs"),
+            "stock_qty": qty,
+            "min_stock": min_stock,
+            "stock_status": (
+                "out" if qty <= 0
+                else "low" if qty <= min_stock and min_stock > 0
+                else "ok"
+            ),
         })
     return serialize_doc(result)
 
 
 @router.get("/stock/movements")
 async def get_movements(request: Request):
-    user = await require_auth(request)
+    await require_auth(request)
     db = get_db()
     sp = request.query_params
-    query = {}
+    query: dict = {"domain": "accessory"}
     if sp.get("acc_id"):
-        query["acc_id"] = sp["acc_id"]
+        query["material_id"] = sp["acc_id"]
     if sp.get("movement_type"):
-        query["movement_type"] = sp["movement_type"]
-    docs = await db.acc_stock_movements.find(query, {"_id": 0}).sort("created_at", -1).limit(200).to_list(500)
-    return serialize_doc(docs)
+        # accept both legacy and canonical types
+        mt = sp["movement_type"].strip()
+        query["$or"] = [
+            {"legacy_movement_type": mt.upper()},
+            {"type": mt.lower()},
+        ]
+    docs = await db.rahaza_material_movements.find(query, {"_id": 0}).sort("created_at", -1).limit(500).to_list(500)
+    out = [await _enrich_movement(db, d) for d in docs]
+    return serialize_doc(out)
 
 
 @router.post("/stock/receive")
@@ -187,22 +420,29 @@ async def receive_stock(request: Request):
     db = get_db()
     body = await request.json()
     acc_id = body.get("acc_id")
-    qty = float(body.get("qty", 0))
+    try:
+        qty = float(body.get("qty", 0))
+    except Exception:
+        raise HTTPException(400, "qty harus angka")
     if not acc_id or qty <= 0:
         raise HTTPException(400, "acc_id dan qty > 0 wajib diisi")
-    item = await db.acc_items.find_one({"id": acc_id, "deleted": {"$ne": True}})
+
+    item = await db.rahaza_materials.find_one({"id": acc_id, "type": "accessory", "active": True})
     if not item:
         raise HTTPException(404, "Aksesoris tidak ditemukan")
-    mv = {
-        "id": _id(), "acc_id": acc_id, "acc_name": item["name"],
-        "movement_type": "IN", "qty_signed": qty,
-        "ref_type": body.get("ref_type", "manual"),
-        "ref_id": body.get("ref_id", ""),
-        "ref_number": body.get("ref_number", ""),
-        "notes": body.get("notes", ""),
-        "created_by": user["name"], "created_at": _now()
-    }
-    await db.acc_stock_movements.insert_one(mv)
+
+    loc_id = await _get_accessory_location_id(db)
+    await _add_stock(db, acc_id, loc_id, qty)
+    await _log_movement(
+        db, user,
+        material_id=acc_id, mv_type="receive", qty=qty,
+        from_loc=None, to_loc=loc_id,
+        ref_type=body.get("ref_type", "manual"),
+        ref_id=body.get("ref_id", ""),
+        ref_number=body.get("ref_number", ""),
+        notes=body.get("notes", ""),
+        legacy_type="IN",
+    )
     new_qty = await _stock_qty(db, acc_id)
     return JSONResponse({"ok": True, "new_qty": new_qty}, status_code=201)
 
@@ -213,39 +453,50 @@ async def issue_stock(request: Request):
     db = get_db()
     body = await request.json()
     acc_id = body.get("acc_id")
-    qty = float(body.get("qty", 0))
+    try:
+        qty = float(body.get("qty", 0))
+    except Exception:
+        raise HTTPException(400, "qty harus angka")
     if not acc_id or qty <= 0:
         raise HTTPException(400, "acc_id dan qty > 0 wajib diisi")
+
+    item = await db.rahaza_materials.find_one({"id": acc_id, "type": "accessory", "active": True})
+    if not item:
+        raise HTTPException(404, "Aksesoris tidak ditemukan")
+
     current = await _stock_qty(db, acc_id)
     if current < qty:
         raise HTTPException(400, f"Stok tidak cukup. Stok saat ini: {current}")
-    item = await db.acc_items.find_one({"id": acc_id})
-    mv = {
-        "id": _id(), "acc_id": acc_id, "acc_name": item["name"] if item else "",
-        "movement_type": "OUT", "qty_signed": -qty,
-        "ref_type": body.get("ref_type", "manual"),
-        "ref_id": body.get("ref_id", ""),
-        "ref_number": body.get("ref_number", ""),
-        "notes": body.get("notes", ""),
-        "created_by": user["name"], "created_at": _now()
-    }
-    await db.acc_stock_movements.insert_one(mv)
+
+    loc_id = await _get_accessory_location_id(db)
+    await _add_stock(db, acc_id, loc_id, -qty)
+    await _log_movement(
+        db, user,
+        material_id=acc_id, mv_type="issue", qty=qty,
+        from_loc=loc_id, to_loc=None,
+        ref_type=body.get("ref_type", "manual"),
+        ref_id=body.get("ref_id", ""),
+        ref_number=body.get("ref_number", ""),
+        notes=body.get("notes", ""),
+        legacy_type="OUT",
+    )
     new_qty = await _stock_qty(db, acc_id)
     return JSONResponse({"ok": True, "new_qty": new_qty}, status_code=201)
 
 
 # ═══════════════════════════════════════════════════════════════
-# INTERNAL REQUESTS — Request dari Divisi Internal
+# INTERNAL REQUESTS (preserved: acc_internal_requests)
 # ═══════════════════════════════════════════════════════════════
 
 DIVISI_OPTIONS = ["Produksi", "Cutting", "CMT", "Gudang", "Kantor", "SDM", "QC", "Packing", "Marketing", "Lainnya"]
 
+
 @router.get("/internal-requests")
 async def list_internal_requests(request: Request):
-    user = await require_auth(request)
+    await require_auth(request)
     db = get_db()
     sp = request.query_params
-    query = {}
+    query: dict = {}
     if sp.get("status"):
         query["status"] = sp["status"]
     if sp.get("divisi"):
@@ -261,7 +512,8 @@ async def create_internal_request(request: Request):
     body = await request.json()
     if not body.get("divisi"):
         raise HTTPException(400, "divisi wajib diisi")
-    if not body.get("items") or not isinstance(body["items"], list) or len(body["items"]) == 0:
+    items = body.get("items") or []
+    if not items or not isinstance(items, list):
         raise HTTPException(400, "items wajib diisi minimal 1")
 
     seq = (await db.acc_internal_requests.count_documents({})) + 1
@@ -269,14 +521,17 @@ async def create_internal_request(request: Request):
         "id": _id(),
         "request_number": f"INT-REQ-{str(seq).zfill(4)}",
         "divisi": body["divisi"],
-        "requester_name": body.get("requester_name", user["name"]),
+        "requester_name": body.get("requester_name", user.get("name", "")),
         "purpose": body.get("purpose", ""),
         "needed_by": body.get("needed_by", ""),
-        "items": body["items"],          # [{acc_id, acc_name, acc_code, qty_requested, unit, notes}]
-        "status": "Pending",             # Pending | Approved | Rejected | Issued
+        "items": items,
+        "status": "Pending",
         "admin_notes": "",
-        "issued_by": "", "issued_at": "",
-        "created_by": user["name"], "created_at": _now(), "updated_at": _now()
+        "issued_by": "",
+        "issued_at": "",
+        "created_by": user.get("name", ""),
+        "created_at": _now_iso(),
+        "updated_at": _now_iso(),
     }
     await db.acc_internal_requests.insert_one(doc)
     return JSONResponse(serialize_doc(doc), status_code=201)
@@ -292,36 +547,49 @@ async def update_internal_request(req_id: str, request: Request):
         raise HTTPException(404, "Request tidak ditemukan")
 
     new_status = body.get("status")
-    upd = {"updated_at": _now()}
+    upd: dict = {"updated_at": _now_iso()}
 
     if new_status == "Approved":
-        upd.update({"status": "Approved", "admin_notes": body.get("admin_notes", ""),
-                     "approved_by": user["name"], "approved_at": _now()})
-
+        upd.update({
+            "status": "Approved",
+            "admin_notes": body.get("admin_notes", ""),
+            "approved_by": user.get("name", ""),
+            "approved_at": _now_iso(),
+        })
     elif new_status == "Rejected":
-        upd.update({"status": "Rejected", "admin_notes": body.get("admin_notes", ""),
-                     "rejected_by": user["name"], "rejected_at": _now()})
-
+        upd.update({
+            "status": "Rejected",
+            "admin_notes": body.get("admin_notes", ""),
+            "rejected_by": user.get("name", ""),
+            "rejected_at": _now_iso(),
+        })
     elif new_status == "Issued":
-        # Kurangi stok untuk setiap item
+        loc_id = await _get_accessory_location_id(db)
         for it in doc.get("items", []):
             acc_id = it.get("acc_id")
-            qty = float(it.get("qty_requested", 0))
-            if acc_id and qty > 0:
-                current = await _stock_qty(db, acc_id)
-                item_doc = await db.acc_items.find_one({"id": acc_id})
-                mv = {
-                    "id": _id(), "acc_id": acc_id,
-                    "acc_name": item_doc["name"] if item_doc else it.get("acc_name", ""),
-                    "movement_type": "OUT", "qty_signed": -qty,
-                    "ref_type": "internal_request", "ref_id": req_id,
-                    "ref_number": doc["request_number"],
-                    "notes": f"Issued ke {doc['divisi']}",
-                    "created_by": user["name"], "created_at": _now()
-                }
-                await db.acc_stock_movements.insert_one(mv)
-        upd.update({"status": "Issued", "issued_by": user["name"], "issued_at": _now()})
-
+            try:
+                qty = float(it.get("qty_requested", 0))
+            except Exception:
+                qty = 0.0
+            if not acc_id or qty <= 0:
+                continue
+            current = await _stock_qty(db, acc_id)
+            if current < qty:
+                raise HTTPException(
+                    400,
+                    f"Stok tidak cukup untuk {it.get('acc_name', acc_id)} (ada: {current}, diminta: {qty})",
+                )
+            await _add_stock(db, acc_id, loc_id, -qty)
+            await _log_movement(
+                db, user,
+                material_id=acc_id, mv_type="issue", qty=qty,
+                from_loc=loc_id, to_loc=None,
+                ref_type="internal_request", ref_id=req_id,
+                ref_number=doc["request_number"],
+                notes=f"Issued ke {doc['divisi']}",
+                legacy_type="OUT",
+            )
+        upd.update({"status": "Issued", "issued_by": user.get("name", ""), "issued_at": _now_iso()})
     else:
         allowed = {k: v for k, v in body.items() if k not in ("_id", "id", "created_at", "created_by", "request_number")}
         upd.update(allowed)
@@ -332,15 +600,15 @@ async def update_internal_request(req_id: str, request: Request):
 
 
 # ═══════════════════════════════════════════════════════════════
-# PEMINJAMAN AKSESORIS
+# PEMINJAMAN AKSESORIS (preserved: acc_loans)
 # ═══════════════════════════════════════════════════════════════
 
 @router.get("/loans")
 async def list_loans(request: Request):
-    user = await require_auth(request)
+    await require_auth(request)
     db = get_db()
     sp = request.query_params
-    query = {}
+    query: dict = {}
     if sp.get("status"):
         query["status"] = sp["status"]
     docs = await db.acc_loans.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
@@ -354,54 +622,63 @@ async def create_loan(request: Request):
     body = await request.json()
     if not body.get("borrower_name"):
         raise HTTPException(400, "borrower_name wajib diisi")
-    if not body.get("items") or len(body["items"]) == 0:
+    items = body.get("items") or []
+    if not items:
         raise HTTPException(400, "items wajib diisi")
 
-    # Cek & kurangi stok
-    for it in body["items"]:
+    # Pre-check stock
+    for it in items:
         acc_id = it.get("acc_id")
-        qty = float(it.get("qty", 0))
-        if acc_id and qty > 0:
-            current = await _stock_qty(db, acc_id)
-            if current < qty:
-                item_doc = await db.acc_items.find_one({"id": acc_id})
-                name = item_doc["name"] if item_doc else acc_id
-                raise HTTPException(400, f"Stok {name} tidak cukup (ada: {current}, diminta: {qty})")
+        try:
+            qty = float(it.get("qty", 0))
+        except Exception:
+            qty = 0.0
+        if not acc_id or qty <= 0:
+            continue
+        current = await _stock_qty(db, acc_id)
+        if current < qty:
+            name = it.get("acc_name") or acc_id
+            raise HTTPException(400, f"Stok {name} tidak cukup (ada: {current}, diminta: {qty})")
 
     seq = (await db.acc_loans.count_documents({})) + 1
+    loan_id = _id()
     doc = {
-        "id": _id(),
+        "id": loan_id,
         "loan_number": f"LOAN-{str(seq).zfill(4)}",
         "borrower_name": body["borrower_name"],
         "borrower_divisi": body.get("borrower_divisi", ""),
         "purpose": body.get("purpose", ""),
-        "loan_date": body.get("loan_date", _now()[:10]),
+        "loan_date": body.get("loan_date", _now_iso()[:10]),
         "expected_return_date": body.get("expected_return_date", ""),
-        "items": body["items"],    # [{acc_id, acc_name, qty, unit}]
-        "status": "Active",        # Active | Returned | Overdue
+        "items": items,
+        "status": "Active",
         "return_notes": "",
         "returned_at": "",
-        "created_by": user["name"], "created_at": _now(), "updated_at": _now()
+        "created_by": user.get("name", ""),
+        "created_at": _now_iso(),
+        "updated_at": _now_iso(),
     }
     await db.acc_loans.insert_one(doc)
 
-    # Kurangi stok
-    for it in body["items"]:
+    loc_id = await _get_accessory_location_id(db)
+    for it in items:
         acc_id = it.get("acc_id")
-        qty = float(it.get("qty", 0))
-        if acc_id and qty > 0:
-            item_doc = await db.acc_items.find_one({"id": acc_id})
-            mv = {
-                "id": _id(), "acc_id": acc_id,
-                "acc_name": item_doc["name"] if item_doc else it.get("acc_name", ""),
-                "movement_type": "LOAN_OUT", "qty_signed": -qty,
-                "ref_type": "loan", "ref_id": doc["id"],
-                "ref_number": doc["loan_number"],
-                "notes": f"Dipinjam oleh {body['borrower_name']}",
-                "created_by": user["name"], "created_at": _now()
-            }
-            await db.acc_stock_movements.insert_one(mv)
-
+        try:
+            qty = float(it.get("qty", 0))
+        except Exception:
+            qty = 0.0
+        if not acc_id or qty <= 0:
+            continue
+        await _add_stock(db, acc_id, loc_id, -qty)
+        await _log_movement(
+            db, user,
+            material_id=acc_id, mv_type="issue", qty=qty,
+            from_loc=loc_id, to_loc=None,
+            ref_type="loan", ref_id=loan_id,
+            ref_number=doc["loan_number"],
+            notes=f"Dipinjam oleh {body['borrower_name']}",
+            legacy_type="LOAN_OUT",
+        )
     return JSONResponse(serialize_doc(doc), status_code=201)
 
 
@@ -416,41 +693,44 @@ async def return_loan(loan_id: str, request: Request):
     if loan["status"] != "Active":
         raise HTTPException(400, "Peminjaman sudah dikembalikan")
 
-    # Kembalikan stok
+    loc_id = await _get_accessory_location_id(db)
     for it in loan.get("items", []):
         acc_id = it.get("acc_id")
-        qty = float(it.get("qty", 0))
-        if acc_id and qty > 0:
-            item_doc = await db.acc_items.find_one({"id": acc_id})
-            mv = {
-                "id": _id(), "acc_id": acc_id,
-                "acc_name": item_doc["name"] if item_doc else it.get("acc_name", ""),
-                "movement_type": "LOAN_RETURN", "qty_signed": qty,
-                "ref_type": "loan", "ref_id": loan_id,
-                "ref_number": loan["loan_number"],
-                "notes": f"Dikembalikan oleh {loan['borrower_name']}",
-                "created_by": user["name"], "created_at": _now()
-            }
-            await db.acc_stock_movements.insert_one(mv)
+        try:
+            qty = float(it.get("qty", 0))
+        except Exception:
+            qty = 0.0
+        if not acc_id or qty <= 0:
+            continue
+        await _add_stock(db, acc_id, loc_id, qty)
+        await _log_movement(
+            db, user,
+            material_id=acc_id, mv_type="receive", qty=qty,
+            from_loc=None, to_loc=loc_id,
+            ref_type="loan", ref_id=loan_id,
+            ref_number=loan["loan_number"],
+            notes=f"Dikembalikan oleh {loan['borrower_name']}",
+            legacy_type="LOAN_RETURN",
+        )
 
     await db.acc_loans.update_one({"id": loan_id}, {"$set": {
         "status": "Returned",
         "return_notes": body.get("return_notes", ""),
-        "returned_at": _now(),
-        "returned_by": user["name"],
-        "updated_at": _now()
+        "returned_at": _now_iso(),
+        "returned_by": user.get("name", ""),
+        "updated_at": _now_iso(),
     }})
     result = await db.acc_loans.find_one({"id": loan_id}, {"_id": 0})
     return serialize_doc(result)
 
 
 # ═══════════════════════════════════════════════════════════════
-# STOK OPNAME
+# STOK OPNAME (preserved: acc_opname_sessions, acc_opname_lines)
 # ═══════════════════════════════════════════════════════════════
 
 @router.get("/opname")
 async def list_opname(request: Request):
-    user = await require_auth(request)
+    await require_auth(request)
     db = get_db()
     sessions = await db.acc_opname_sessions.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
     return serialize_doc(sessions)
@@ -462,7 +742,6 @@ async def start_opname(request: Request):
     db = get_db()
     body = await request.json()
 
-    # Cek ada sesi aktif
     active = await db.acc_opname_sessions.find_one({"status": "Active"})
     if active:
         raise HTTPException(400, f"Masih ada sesi opname aktif: {active.get('ref_number')}")
@@ -471,19 +750,24 @@ async def start_opname(request: Request):
     session_id = _id()
     ref = f"OPNAME-{str(seq).zfill(4)}"
 
-    # Snapshot semua aksesoris dengan stok sistem
-    items = await db.acc_items.find({"deleted": {"$ne": True}}, {"_id": 0}).to_list(500)
-    stock_map = await _all_stock(db)
+    # Snapshot semua aksesoris dengan stok sistem (dari SSOT)
+    mats = await db.rahaza_materials.find(
+        {"type": "accessory", "active": True}, {"_id": 0}
+    ).to_list(5000)
+    stock_map = await _all_accessory_stock(db)
     lines = []
-    for it in items:
+    for m in mats:
         lines.append({
-            "id": _id(), "session_id": session_id,
-            "acc_id": it["id"], "acc_name": it["name"], "acc_code": it["code"],
-            "unit": it["unit"],
-            "system_qty": stock_map.get(it["id"], 0),
-            "counted_qty": None,  # belum dihitung
+            "id": _id(),
+            "session_id": session_id,
+            "acc_id": m["id"],
+            "acc_name": m.get("name", ""),
+            "acc_code": m.get("code", ""),
+            "unit": m.get("unit", "pcs"),
+            "system_qty": float(stock_map.get(m["id"], 0)),
+            "counted_qty": None,
             "diff": None,
-            "notes": ""
+            "notes": "",
         })
 
     session = {
@@ -491,26 +775,25 @@ async def start_opname(request: Request):
         "notes": body.get("notes", ""),
         "status": "Active",
         "total_items": len(lines), "counted_items": 0,
-        "started_by": user["name"], "started_at": _now(),
+        "started_by": user.get("name", ""), "started_at": _now_iso(),
         "completed_at": "", "completed_by": "",
-        "created_at": _now(), "updated_at": _now()
+        "created_at": _now_iso(), "updated_at": _now_iso(),
     }
     await db.acc_opname_sessions.insert_one(session)
     if lines:
         await db.acc_opname_lines.insert_many(lines)
-
     session["lines"] = lines
     return JSONResponse(serialize_doc(session), status_code=201)
 
 
 @router.get("/opname/{session_id}")
 async def get_opname_detail(session_id: str, request: Request):
-    user = await require_auth(request)
+    await require_auth(request)
     db = get_db()
     session = await db.acc_opname_sessions.find_one({"id": session_id}, {"_id": 0})
     if not session:
         raise HTTPException(404, "Sesi tidak ditemukan")
-    lines = await db.acc_opname_lines.find({"session_id": session_id}, {"_id": 0}).to_list(500)
+    lines = await db.acc_opname_lines.find({"session_id": session_id}, {"_id": 0}).to_list(2000)
     session["lines"] = lines
     return serialize_doc(session)
 
@@ -520,7 +803,6 @@ async def update_count(session_id: str, request: Request):
     user = await require_auth(request)
     db = get_db()
     body = await request.json()
-    # body: {acc_id, counted_qty, notes}
     acc_id = body.get("acc_id")
     counted_qty = body.get("counted_qty")
     if acc_id is None or counted_qty is None:
@@ -530,21 +812,25 @@ async def update_count(session_id: str, request: Request):
     if not line:
         raise HTTPException(404, "Baris opname tidak ditemukan")
 
-    system_qty = line.get("system_qty", 0)
-    diff = float(counted_qty) - float(system_qty)
+    system_qty = float(line.get("system_qty") or 0)
+    diff = float(counted_qty) - system_qty
     await db.acc_opname_lines.update_one(
         {"session_id": session_id, "acc_id": acc_id},
-        {"$set": {"counted_qty": float(counted_qty), "diff": diff,
-                  "notes": body.get("notes", ""),
-                  "counted_by": user["name"], "counted_at": _now()}}
+        {"$set": {
+            "counted_qty": float(counted_qty),
+            "diff": diff,
+            "notes": body.get("notes", ""),
+            "counted_by": user.get("name", ""),
+            "counted_at": _now_iso(),
+        }},
     )
 
-    # Update counted_items di session
     total_counted = await db.acc_opname_lines.count_documents(
-        {"session_id": session_id, "counted_qty": {"$ne": None}})
+        {"session_id": session_id, "counted_qty": {"$ne": None}}
+    )
     await db.acc_opname_sessions.update_one(
         {"id": session_id},
-        {"$set": {"counted_items": total_counted, "updated_at": _now()}}
+        {"$set": {"counted_items": total_counted, "updated_at": _now_iso()}},
     )
     return {"ok": True, "diff": diff}
 
@@ -561,51 +847,58 @@ async def complete_opname(session_id: str, request: Request):
 
     lines = await db.acc_opname_lines.find(
         {"session_id": session_id, "diff": {"$nin": [None, 0]}},
-        {"_id": 0}
-    ).to_list(500)
+        {"_id": 0},
+    ).to_list(5000)
 
-    # Buat adjustment movements untuk setiap selisih
+    loc_id = await _get_accessory_location_id(db)
     for ln in lines:
-        diff = float(ln.get("diff", 0))
-        if diff != 0:
-            mv = {
-                "id": _id(), "acc_id": ln["acc_id"], "acc_name": ln["acc_name"],
-                "movement_type": "ADJUST",
-                "qty_signed": diff,
-                "ref_type": "opname", "ref_id": session_id,
-                "ref_number": session["ref_number"],
-                "notes": f"Adjustment opname {session['ref_number']}",
-                "created_by": user["name"], "created_at": _now()
-            }
-            await db.acc_stock_movements.insert_one(mv)
+        diff = float(ln.get("diff") or 0)
+        if diff == 0:
+            continue
+        acc_id = ln["acc_id"]
+        # Apply adjustment to stock + log to SSOT movements
+        await _add_stock(db, acc_id, loc_id, diff)
+        await _log_movement(
+            db, user,
+            material_id=acc_id, mv_type="adjust", qty=diff,
+            from_loc=loc_id if diff < 0 else None,
+            to_loc=loc_id if diff > 0 else None,
+            ref_type="opname", ref_id=session_id,
+            ref_number=session["ref_number"],
+            notes=f"Adjustment opname {session['ref_number']}",
+            legacy_type="ADJUST",
+        )
 
     await db.acc_opname_sessions.update_one({"id": session_id}, {"$set": {
         "status": "Completed",
-        "completed_by": user["name"], "completed_at": _now(), "updated_at": _now()
+        "completed_by": user.get("name", ""),
+        "completed_at": _now_iso(),
+        "updated_at": _now_iso(),
     }})
     return {"ok": True, "adjustments_made": len(lines)}
 
 
 @router.post("/opname/{session_id}/cancel")
 async def cancel_opname(session_id: str, request: Request):
-    user = await require_auth(request)
+    await require_auth(request)
     db = get_db()
-    await db.acc_opname_sessions.update_one({"id": session_id}, {"$set": {
-        "status": "Cancelled", "updated_at": _now()
-    }})
+    await db.acc_opname_sessions.update_one(
+        {"id": session_id},
+        {"$set": {"status": "Cancelled", "updated_at": _now_iso()}},
+    )
     return {"ok": True}
 
 
 # ═══════════════════════════════════════════════════════════════
-# PURCHASE REQUEST KE FINANCE
+# PURCHASE REQUEST (preserved: acc_purchase_requests)
 # ═══════════════════════════════════════════════════════════════
 
 @router.get("/purchase-requests")
 async def list_purchase_requests(request: Request):
-    user = await require_auth(request)
+    await require_auth(request)
     db = get_db()
     sp = request.query_params
-    query = {}
+    query: dict = {}
     if sp.get("status"):
         query["status"] = sp["status"]
     docs = await db.acc_purchase_requests.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
@@ -617,27 +910,30 @@ async def create_purchase_request(request: Request):
     user = await require_auth(request)
     db = get_db()
     body = await request.json()
-    if not body.get("items") or len(body["items"]) == 0:
+    items = body.get("items") or []
+    if not items:
         raise HTTPException(400, "items wajib diisi")
 
     seq = (await db.acc_purchase_requests.count_documents({})) + 1
     doc = {
         "id": _id(),
         "pr_number": f"ACC-PR-{str(seq).zfill(4)}",
-        "priority": body.get("priority", "Normal"),   # Urgent | Normal | Low
+        "priority": body.get("priority", "Normal"),
         "purpose": body.get("purpose", ""),
         "supplier": body.get("supplier", ""),
-        "items": body["items"],   # [{acc_id, acc_name, qty_requested, unit, estimated_price, notes}]
+        "items": items,
         "total_estimated": sum(
-            float(i.get("qty_requested", 0)) * float(i.get("estimated_price", 0))
-            for i in body["items"]
+            float(i.get("qty_requested") or 0) * float(i.get("estimated_price") or 0)
+            for i in items
         ),
         "notes": body.get("notes", ""),
-        "status": "Draft",   # Draft | Submitted | Approved | Rejected | Ordered | Received
+        "status": "Draft",
         "submitted_at": "",
         "approved_by": "", "approved_at": "",
         "finance_notes": "",
-        "created_by": user["name"], "created_at": _now(), "updated_at": _now()
+        "created_by": user.get("name", ""),
+        "created_at": _now_iso(),
+        "updated_at": _now_iso(),
     }
     await db.acc_purchase_requests.insert_one(doc)
     return JSONResponse(serialize_doc(doc), status_code=201)
@@ -653,37 +949,47 @@ async def update_purchase_request(pr_id: str, request: Request):
         raise HTTPException(404, "PR tidak ditemukan")
 
     new_status = body.get("status")
-    upd = {"updated_at": _now()}
+    upd: dict = {"updated_at": _now_iso()}
 
     if new_status == "Submitted":
-        upd.update({"status": "Submitted", "submitted_at": _now()})
+        upd.update({"status": "Submitted", "submitted_at": _now_iso()})
     elif new_status == "Approved":
-        upd.update({"status": "Approved", "approved_by": user["name"],
-                     "approved_at": _now(), "finance_notes": body.get("finance_notes", "")})
+        upd.update({
+            "status": "Approved",
+            "approved_by": user.get("name", ""),
+            "approved_at": _now_iso(),
+            "finance_notes": body.get("finance_notes", ""),
+        })
     elif new_status == "Rejected":
-        upd.update({"status": "Rejected", "finance_notes": body.get("finance_notes", ""),
-                     "rejected_by": user["name"], "rejected_at": _now()})
+        upd.update({
+            "status": "Rejected",
+            "finance_notes": body.get("finance_notes", ""),
+            "rejected_by": user.get("name", ""),
+            "rejected_at": _now_iso(),
+        })
     elif new_status == "Ordered":
-        upd.update({"status": "Ordered", "ordered_at": _now()})
+        upd.update({"status": "Ordered", "ordered_at": _now_iso()})
     elif new_status == "Received":
-        # Auto-receive stok ke gudang aksesoris
+        loc_id = await _get_accessory_location_id(db)
         for it in doc.get("items", []):
             acc_id = it.get("acc_id")
-            qty = float(it.get("qty_requested", 0))
-            if acc_id and qty > 0:
-                item_doc = await db.acc_items.find_one({"id": acc_id})
-                mv = {
-                    "id": _id(), "acc_id": acc_id,
-                    "acc_name": item_doc["name"] if item_doc else it.get("acc_name", ""),
-                    "movement_type": "IN",
-                    "qty_signed": qty,
-                    "ref_type": "purchase_request", "ref_id": pr_id,
-                    "ref_number": doc["pr_number"],
-                    "notes": f"Terima dari PR {doc['pr_number']}",
-                    "created_by": user["name"], "created_at": _now()
-                }
-                await db.acc_stock_movements.insert_one(mv)
-        upd.update({"status": "Received", "received_at": _now()})
+            try:
+                qty = float(it.get("qty_requested") or 0)
+            except Exception:
+                qty = 0.0
+            if not acc_id or qty <= 0:
+                continue
+            await _add_stock(db, acc_id, loc_id, qty)
+            await _log_movement(
+                db, user,
+                material_id=acc_id, mv_type="receive", qty=qty,
+                from_loc=None, to_loc=loc_id,
+                ref_type="purchase_request", ref_id=pr_id,
+                ref_number=doc["pr_number"],
+                notes=f"Terima dari PR {doc['pr_number']}",
+                legacy_type="IN",
+            )
+        upd.update({"status": "Received", "received_at": _now_iso()})
     else:
         allowed = {k: v for k, v in body.items() if k not in ("_id", "id", "created_at", "created_by", "pr_number")}
         upd.update(allowed)
@@ -694,29 +1000,38 @@ async def update_purchase_request(pr_id: str, request: Request):
 
 
 # ═══════════════════════════════════════════════════════════════
-# DASHBOARD SUMMARY
+# DASHBOARD
 # ═══════════════════════════════════════════════════════════════
 
 @router.get("/dashboard")
 async def get_dashboard(request: Request):
-    user = await require_auth(request)
+    await require_auth(request)
     db = get_db()
 
-    total_items = await db.acc_items.count_documents({"deleted": {"$ne": True}})
-    stock_map = await _all_stock(db)
-    items = await db.acc_items.find({"deleted": {"$ne": True}}, {"_id": 0}).to_list(500)
+    total_items = await db.rahaza_materials.count_documents({"type": "accessory", "active": True})
+    stock_map = await _all_accessory_stock(db)
+    mats = await db.rahaza_materials.find(
+        {"type": "accessory", "active": True}, {"_id": 0}
+    ).to_list(5000)
 
-    low_stock_items = []
+    low_stock_items: list[dict] = []
     out_of_stock = 0
     low_stock = 0
-    for it in items:
-        qty = stock_map.get(it["id"], 0)
+    for m in mats:
+        qty = float(stock_map.get(m["id"], 0))
+        min_s = float(m.get("min_stock") or 0)
         if qty <= 0:
             out_of_stock += 1
-        elif qty <= it.get("min_stock", 0) and it.get("min_stock", 0) > 0:
+        elif min_s > 0 and qty <= min_s:
             low_stock += 1
-            low_stock_items.append({"id": it["id"], "code": it["code"], "name": it["name"],
-                                     "stock_qty": qty, "min_stock": it.get("min_stock", 0), "unit": it["unit"]})
+            low_stock_items.append({
+                "id": m["id"],
+                "code": m.get("code", ""),
+                "name": m.get("name", ""),
+                "stock_qty": qty,
+                "min_stock": min_s,
+                "unit": m.get("unit", "pcs"),
+            })
 
     pending_requests = await db.acc_internal_requests.count_documents({"status": "Pending"})
     active_loans = await db.acc_loans.count_documents({"status": "Active"})
@@ -731,5 +1046,5 @@ async def get_dashboard(request: Request):
         "pending_requests": pending_requests,
         "active_loans": active_loans,
         "pending_pr": pending_pr,
-        "active_opname": active_opname["ref_number"] if active_opname else None
+        "active_opname": active_opname["ref_number"] if active_opname else None,
     }

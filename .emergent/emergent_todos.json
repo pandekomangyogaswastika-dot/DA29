@@ -1,38 +1,42 @@
 [
   {
-    "content": "Eksplorasi state - DONE",
+    "content": "Restore codebase: copy entire /tmp/DA28/ to /app/ (preserve .env)",
     "status": "completed"
   },
   {
-    "content": "P2.G1: Communication Hub - SKIP (sudah lengkap)",
+    "content": "Install backend (pip) + frontend (yarn) dependencies",
     "status": "completed"
   },
   {
-    "content": "P2.G2: Asset Management - SKIP (sudah lengkap)",
+    "content": "Restart services dan verifikasi sistem jalan (backend + frontend)",
     "status": "completed"
   },
   {
-    "content": "P2.G3: My Workspace - SKIP (sudah lengkap P0-P5)",
+    "content": "Verifikasi database state + login dengan admin@garment.com",
     "status": "completed"
   },
   {
-    "content": "P2.G4: Marketing Seed Data - DONE",
+    "content": "Baca dokumen P1.A: FORENSIC_04_DATA_ARCHITECTURE.md, AccessoryModule.jsx, dewi_accessories_full.py",
     "status": "completed"
   },
   {
-    "content": "Verify marketing portal screenshot - DONE (5 accounts active)",
+    "content": "Phase 1 POC: POC SSOT untuk core flow (items+stock+movements) PASS 100%",
     "status": "completed"
   },
   {
-    "content": "Update PRD.md - DONE",
+    "content": "Phase 2: dewi_accessories_full.py refactor lengkap untuk semua endpoint (items, stock, IR, loans, opname, PR, dashboard) - SSOT internal",
     "status": "completed"
   },
   {
-    "content": "Buat NEXT_AGENT_INSTRUCTIONS.md - DONE",
+    "content": "Phase 3: Migration script migrate_accessories.py - dry-run + execute PASS (2 items + 4 movements migrated, saldo 450/27 OK)",
     "status": "completed"
   },
   {
-    "content": "Buat GAP_ANALYSIS_REPORT_STATUS_UPDATE.md - DONE",
-    "status": "completed"
+    "content": "Phase 4: Testing dengan testing_agent_v3 - end-to-end accessory flow (items, stock, IR, loans, opname, PR)",
+    "status": "in_progress"
+  },
+  {
+    "content": "Update PRD.md dan plan.md dengan progress P1.A",
+    "status": "pending"
   }
 ]

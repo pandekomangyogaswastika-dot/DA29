@@ -1,33 +1,30 @@
 """
 CV. Dewi Aditya - Backend API Testing
-Phase 8: Pagination & Vendor Portal Progress History
+P1.A: Accessory Consolidation (SSOT-backed implementation)
 
-Tests:
-1. Unified Inventory Pagination (GET /api/wms/stock/unified)
-   - Basic pagination with page/limit
-   - Pagination with filters (category, search)
-   - Edge cases (out-of-range page, limit clamping)
-2. Vendor Portal Progress History (GET /api/dewi/cmt/vendor/my-jobs/{job_id}/progress-history)
-   - Vendor ownership validation
-   - Admin access bypass
-   - 403/404 error handling
-3. Regression Tests:
-   - Unified inventory summary
-   - Stock adjustment
-   - Phase 7 reports (daily, monthly)
+Tests all /api/acc/* endpoints to verify:
+- Items now backed by rahaza_materials (type='accessory')
+- Stock backed by rahaza_material_stock
+- Movements backed by rahaza_material_movements
+- Specialized features (loans, internal-requests, purchase-requests, opname) preserved
+
+Test Coverage:
+1. Item CRUD (list, create, update, delete)
+2. Stock operations (receive, issue, movements)
+3. Internal requests (create, approve, issue)
+4. Loans (create, return)
+5. Purchase requests (create, submit, receive)
+6. Opname (start, count, complete)
+7. Dashboard stats
 """
 import requests
 import sys
-from datetime import datetime, date
+from datetime import datetime
 
 # Configuration
-BASE_URL = "https://workspace-hub-build.preview.emergentagent.com"
+BASE_URL = "https://doc-audit-4.preview.emergentagent.com"
 ADMIN_EMAIL = "admin@garment.com"
 ADMIN_PASSWORD = "Admin@123"
-VENDOR1_EMAIL = "vendor1@cmt.com"
-VENDOR1_PASSWORD = "Vendor@123"
-VENDOR2_EMAIL = "vendor2@cmt.com"
-VENDOR2_PASSWORD = "Vendor@123"
 
 class Colors:
     GREEN = '\033[92m'
@@ -38,33 +35,38 @@ class Colors:
     MAGENTA = '\033[95m'
     END = '\033[0m'
 
-class Phase8Tester:
+class AccessoryTester:
     def __init__(self):
-        self.admin_token = None
-        self.vendor1_token = None
-        self.vendor2_token = None
+        self.token = None
         self.tests_run = 0
         self.tests_passed = 0
         self.tests_failed = 0
         self.failed_tests = []
-        self.vendor1_job_id = None
-        self.vendor2_job_id = None
+        
+        # Test data IDs (will be populated during tests)
+        self.test_item_id = None
+        self.test_request_id = None
+        self.test_loan_id = None
+        self.test_pr_id = None
+        self.test_opname_id = None
 
     def log(self, msg, color=Colors.BLUE):
         print(f"{color}{msg}{Colors.END}")
 
-    def test(self, name, method, endpoint, expected_status, data=None, token=None, params=None):
+    def test(self, name, method, endpoint, expected_status, data=None, params=None):
         """Run a single API test"""
         url = f"{BASE_URL}{endpoint}"
         headers = {'Content-Type': 'application/json'}
-        if token:
-            headers['Authorization'] = f'Bearer {token}'
+        if self.token:
+            headers['Authorization'] = f'Bearer {self.token}'
 
         self.tests_run += 1
         print(f"\n{Colors.BLUE}🔍 Test {self.tests_run}: {name}{Colors.END}")
         print(f"   {method} {endpoint}")
         if params:
             print(f"   Params: {params}")
+        if data:
+            print(f"   Data: {data}")
         
         try:
             if method == 'GET':
@@ -73,8 +75,6 @@ class Phase8Tester:
                 response = requests.post(url, json=data, headers=headers, timeout=15)
             elif method == 'PUT':
                 response = requests.put(url, json=data, headers=headers, timeout=15)
-            elif method == 'PATCH':
-                response = requests.patch(url, json=data, headers=headers, timeout=15)
             elif method == 'DELETE':
                 response = requests.delete(url, headers=headers, timeout=15)
             else:
@@ -100,464 +100,642 @@ class Phase8Tester:
                     print(f"{Colors.RED}   Response: {response.text[:200]}{Colors.END}")
                 return False, {}
 
-        except requests.exceptions.Timeout:
-            self.tests_failed += 1
-            self.failed_tests.append(name)
-            print(f"{Colors.RED}❌ FAIL - Request timeout{Colors.END}")
-            return False, {}
         except Exception as e:
             self.tests_failed += 1
             self.failed_tests.append(name)
-            print(f"{Colors.RED}❌ FAIL - Error: {str(e)}{Colors.END}")
+            print(f"{Colors.RED}❌ FAIL - Exception: {str(e)}{Colors.END}")
             return False, {}
 
-    def run_all_tests(self):
-        """Execute all test suites"""
-        self.log("\n" + "="*80, Colors.CYAN)
-        self.log("CV. DEWI ADITYA - BACKEND API TESTING", Colors.CYAN)
-        self.log("Phase 8: Pagination & Vendor Portal Progress History", Colors.CYAN)
-        self.log("="*80 + "\n", Colors.CYAN)
-
-        # ─── AUTHENTICATION ───
-        self.log("\n📋 PHASE 0: AUTHENTICATION", Colors.YELLOW)
+    def login(self):
+        """Login as admin"""
+        self.log("\n" + "="*80, Colors.MAGENTA)
+        self.log("AUTHENTICATION", Colors.MAGENTA)
+        self.log("="*80, Colors.MAGENTA)
         
-        # Admin login
-        success, data = self.test(
+        success, response = self.test(
             "Admin Login",
             "POST",
             "/api/auth/login",
             200,
             data={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
         )
-        if success and data.get('token'):
-            self.admin_token = data['token']
-            self.log(f"   ✓ Admin token obtained", Colors.GREEN)
+        if success and 'token' in response:
+            self.token = response['token']
+            self.log(f"✅ Logged in as {ADMIN_EMAIL}", Colors.GREEN)
+            return True
         else:
-            self.log("   ❌ Admin login failed - stopping tests", Colors.RED)
-            return self.print_summary()
+            self.log("❌ Login failed - cannot proceed", Colors.RED)
+            return False
 
-        # Vendor1 login
-        success, data = self.test(
-            "Vendor1 Login",
-            "POST",
-            "/api/auth/login",
-            200,
-            data={"email": VENDOR1_EMAIL, "password": VENDOR1_PASSWORD}
-        )
-        if success and data.get('token'):
-            self.vendor1_token = data['token']
-            self.log(f"   ✓ Vendor1 token obtained", Colors.GREEN)
-        else:
-            self.log("   ⚠ Vendor1 login failed - some tests will be skipped", Colors.YELLOW)
-
-        # Vendor2 login
-        success, data = self.test(
-            "Vendor2 Login",
-            "POST",
-            "/api/auth/login",
-            200,
-            data={"email": VENDOR2_EMAIL, "password": VENDOR2_PASSWORD}
-        )
-        if success and data.get('token'):
-            self.vendor2_token = data['token']
-            self.log(f"   ✓ Vendor2 token obtained", Colors.GREEN)
-        else:
-            self.log("   ⚠ Vendor2 login failed - some tests will be skipped", Colors.YELLOW)
-
-        # ─── PHASE 8.1: UNIFIED INVENTORY PAGINATION ───
-        self.log("\n📋 PHASE 8.1: UNIFIED INVENTORY PAGINATION", Colors.YELLOW)
+    def test_items_crud(self):
+        """Test item CRUD operations"""
+        self.log("\n" + "="*80, Colors.MAGENTA)
+        self.log("SECTION 1: ITEM CRUD (rahaza_materials with type='accessory')", Colors.MAGENTA)
+        self.log("="*80, Colors.MAGENTA)
         
-        # Test 1: Basic pagination page=1, limit=3
-        self.log("\n   🔹 Test 8.1.1: Basic Pagination (page=1, limit=3)", Colors.CYAN)
-        success, data = self.test(
-            "GET /api/wms/stock/unified?page=1&limit=3",
+        # 1. List items (should include migrated legacy items)
+        success, response = self.test(
+            "GET /api/acc/items - List all accessories",
             "GET",
-            "/api/wms/stock/unified",
-            200,
-            token=self.admin_token,
-            params={"page": 1, "limit": 3}
+            "/api/acc/items",
+            200
         )
         if success:
-            # Verify response structure
-            required_fields = ['items', 'total', 'page', 'limit', 'total_pages', 'has_next', 'has_prev', 'filters_applied']
-            missing_fields = [f for f in required_fields if f not in data]
-            if missing_fields:
-                self.log(f"   ❌ Missing fields in response: {missing_fields}", Colors.RED)
-                self.tests_failed += 1
-                self.failed_tests.append("Pagination response structure validation")
-            else:
-                self.log(f"   ✓ Response structure valid", Colors.GREEN)
-                self.log(f"   ✓ Total items: {data.get('total')}", Colors.GREEN)
-                self.log(f"   ✓ Page: {data.get('page')}, Limit: {data.get('limit')}", Colors.GREEN)
-                self.log(f"   ✓ Total pages: {data.get('total_pages')}", Colors.GREEN)
-                self.log(f"   ✓ Has next: {data.get('has_next')}, Has prev: {data.get('has_prev')}", Colors.GREEN)
-                
-                # Verify total_pages calculation
-                total = data.get('total', 0)
-                limit = data.get('limit', 1)
-                expected_total_pages = (total + limit - 1) // limit if total > 0 else 0
-                actual_total_pages = data.get('total_pages', 0)
-                if expected_total_pages == actual_total_pages:
-                    self.log(f"   ✓ Total pages calculation correct: {actual_total_pages}", Colors.GREEN)
+            items = response if isinstance(response, list) else []
+            self.log(f"   Found {len(items)} accessories", Colors.CYAN)
+            if len(items) > 0:
+                sample = items[0]
+                self.log(f"   Sample: {sample.get('code')} - {sample.get('name')}", Colors.CYAN)
+                # Verify field shape
+                required_fields = ['id', 'code', 'name', 'category', 'unit', 'stock_qty', 'stock_status']
+                missing = [f for f in required_fields if f not in sample]
+                if missing:
+                    self.log(f"   ⚠️  Missing fields: {missing}", Colors.YELLOW)
+        
+        # 2. Search by name
+        success, response = self.test(
+            "GET /api/acc/items?search=Legacy - Search accessories",
+            "GET",
+            "/api/acc/items",
+            200,
+            params={"search": "Legacy"}
+        )
+        if success:
+            items = response if isinstance(response, list) else []
+            self.log(f"   Found {len(items)} items matching 'Legacy'", Colors.CYAN)
+        
+        # 3. Filter by category
+        success, response = self.test(
+            "GET /api/acc/items?category=Resleting - Filter by category",
+            "GET",
+            "/api/acc/items",
+            200,
+            params={"category": "Resleting"}
+        )
+        
+        # 4. Create new accessory
+        success, response = self.test(
+            "POST /api/acc/items - Create accessory 'Test Resleting YKK'",
+            "POST",
+            "/api/acc/items",
+            201,
+            data={
+                "name": "Test Resleting YKK",
+                "code": "TEST-RES-001",
+                "category": "Resleting",
+                "unit": "pcs",
+                "min_stock": 20,
+                "description": "Test item for P1.A validation",
+                "supplier": "YKK Indonesia"
+            }
+        )
+        if success:
+            self.test_item_id = response.get('id')
+            self.log(f"   Created item ID: {self.test_item_id}", Colors.CYAN)
+            self.log(f"   Code: {response.get('code')}", Colors.CYAN)
+            self.log(f"   Stock status: {response.get('stock_status')}", Colors.CYAN)
+        
+        # 5. Verify item appears in list
+        if self.test_item_id:
+            success, response = self.test(
+                "GET /api/acc/items - Verify new item in list",
+                "GET",
+                "/api/acc/items",
+                200
+            )
+            if success:
+                items = response if isinstance(response, list) else []
+                found = any(item.get('id') == self.test_item_id for item in items)
+                if found:
+                    self.log(f"   ✅ New item found in list", Colors.GREEN)
                 else:
-                    self.log(f"   ❌ Total pages calculation wrong: expected {expected_total_pages}, got {actual_total_pages}", Colors.RED)
-                    self.tests_failed += 1
-                    self.failed_tests.append("Total pages calculation")
+                    self.log(f"   ❌ New item NOT found in list", Colors.RED)
+        
+        # 6. Update item (change min_stock to 50)
+        if self.test_item_id:
+            success, response = self.test(
+                "PUT /api/acc/items/{id} - Update min_stock to 50",
+                "PUT",
+                f"/api/acc/items/{self.test_item_id}",
+                200,
+                data={"min_stock": 50}
+            )
+            if success:
+                new_min = response.get('min_stock')
+                if new_min == 50:
+                    self.log(f"   ✅ min_stock updated to {new_min}", Colors.GREEN)
+                else:
+                    self.log(f"   ❌ min_stock is {new_min}, expected 50", Colors.RED)
+
+    def test_stock_operations(self):
+        """Test stock receive, issue, and movements"""
+        self.log("\n" + "="*80, Colors.MAGENTA)
+        self.log("SECTION 2: STOCK OPERATIONS (rahaza_material_stock + movements)", Colors.MAGENTA)
+        self.log("="*80, Colors.MAGENTA)
+        
+        if not self.test_item_id:
+            self.log("⚠️  Skipping stock tests - no test item created", Colors.YELLOW)
+            return
+        
+        # 1. Receive stock (100 pcs)
+        success, response = self.test(
+            "POST /api/acc/stock/receive - Receive 100 pcs",
+            "POST",
+            "/api/acc/stock/receive",
+            201,
+            data={
+                "acc_id": self.test_item_id,
+                "qty": 100,
+                "notes": "Initial stock for testing",
+                "ref_type": "manual"
+            }
+        )
+        if success:
+            new_qty = response.get('new_qty')
+            self.log(f"   New stock quantity: {new_qty}", Colors.CYAN)
+            if new_qty == 100:
+                self.log(f"   ✅ Stock correctly updated to 100", Colors.GREEN)
+            else:
+                self.log(f"   ❌ Expected 100, got {new_qty}", Colors.RED)
+        
+        # 2. Verify stock in overview
+        success, response = self.test(
+            "GET /api/acc/stock - Verify stock in overview",
+            "GET",
+            "/api/acc/stock",
+            200
+        )
+        if success:
+            items = response if isinstance(response, list) else []
+            item = next((i for i in items if i.get('id') == self.test_item_id), None)
+            if item:
+                stock_qty = item.get('stock_qty')
+                stock_status = item.get('stock_status')
+                self.log(f"   Stock qty: {stock_qty}, status: {stock_status}", Colors.CYAN)
+                if stock_qty == 100 and stock_status == 'ok':
+                    self.log(f"   ✅ Stock overview correct", Colors.GREEN)
+                else:
+                    self.log(f"   ❌ Stock overview incorrect", Colors.RED)
+        
+        # 3. Issue stock (30 pcs)
+        success, response = self.test(
+            "POST /api/acc/stock/issue - Issue 30 pcs",
+            "POST",
+            "/api/acc/stock/issue",
+            201,
+            data={
+                "acc_id": self.test_item_id,
+                "qty": 30,
+                "notes": "Test issue",
+                "ref_type": "manual"
+            }
+        )
+        if success:
+            new_qty = response.get('new_qty')
+            self.log(f"   New stock quantity: {new_qty}", Colors.CYAN)
+            if new_qty == 70:
+                self.log(f"   ✅ Stock correctly updated to 70", Colors.GREEN)
+            else:
+                self.log(f"   ❌ Expected 70, got {new_qty}", Colors.RED)
+        
+        # 4. Try to issue more than available (should fail)
+        success, response = self.test(
+            "POST /api/acc/stock/issue - Try to issue 200 pcs (should fail)",
+            "POST",
+            "/api/acc/stock/issue",
+            400,
+            data={
+                "acc_id": self.test_item_id,
+                "qty": 200,
+                "notes": "Should fail - insufficient stock"
+            }
+        )
+        if success:
+            self.log(f"   ✅ Correctly rejected insufficient stock", Colors.GREEN)
+        
+        # 5. Verify movements logged
+        success, response = self.test(
+            "GET /api/acc/stock/movements?acc_id={id} - Verify movements",
+            "GET",
+            "/api/acc/stock/movements",
+            200,
+            params={"acc_id": self.test_item_id}
+        )
+        if success:
+            movements = response if isinstance(response, list) else []
+            self.log(f"   Found {len(movements)} movements", Colors.CYAN)
+            if len(movements) >= 2:
+                # Should have IN +100 and OUT -30
+                in_mvs = [m for m in movements if m.get('movement_type') == 'IN']
+                out_mvs = [m for m in movements if m.get('movement_type') == 'OUT']
+                self.log(f"   IN movements: {len(in_mvs)}, OUT movements: {len(out_mvs)}", Colors.CYAN)
                 
-                # Verify has_next for page 1 with data > 3
-                if total > 3:
-                    if data.get('has_next') == True:
-                        self.log(f"   ✓ has_next=true for page 1 (total={total} > limit=3)", Colors.GREEN)
+                # Verify qty_signed
+                for m in movements[:2]:
+                    self.log(f"   Movement: {m.get('movement_type')} qty_signed={m.get('qty_signed')}", Colors.CYAN)
+
+    def test_internal_requests(self):
+        """Test internal request workflow"""
+        self.log("\n" + "="*80, Colors.MAGENTA)
+        self.log("SECTION 3: INTERNAL REQUESTS (acc_internal_requests)", Colors.MAGENTA)
+        self.log("="*80, Colors.MAGENTA)
+        
+        if not self.test_item_id:
+            self.log("⚠️  Skipping internal request tests - no test item", Colors.YELLOW)
+            return
+        
+        # 1. Create internal request
+        success, response = self.test(
+            "POST /api/acc/internal-requests - Create request",
+            "POST",
+            "/api/acc/internal-requests",
+            201,
+            data={
+                "divisi": "Produksi",
+                "purpose": "Test request for P1.A validation",
+                "items": [
+                    {
+                        "acc_id": self.test_item_id,
+                        "acc_name": "Test Resleting YKK",
+                        "qty_requested": 10
+                    }
+                ]
+            }
+        )
+        if success:
+            self.test_request_id = response.get('id')
+            request_number = response.get('request_number')
+            status = response.get('status')
+            self.log(f"   Request ID: {self.test_request_id}", Colors.CYAN)
+            self.log(f"   Request number: {request_number}", Colors.CYAN)
+            self.log(f"   Status: {status}", Colors.CYAN)
+            if status == 'Pending':
+                self.log(f"   ✅ Request created with Pending status", Colors.GREEN)
+        
+        # 2. Approve request
+        if self.test_request_id:
+            success, response = self.test(
+                "PUT /api/acc/internal-requests/{id} - Approve request",
+                "PUT",
+                f"/api/acc/internal-requests/{self.test_request_id}",
+                200,
+                data={"status": "Approved", "admin_notes": "Approved for testing"}
+            )
+            if success:
+                status = response.get('status')
+                if status == 'Approved':
+                    self.log(f"   ✅ Request approved", Colors.GREEN)
+        
+        # 3. Issue request (should deduct stock)
+        if self.test_request_id:
+            success, response = self.test(
+                "PUT /api/acc/internal-requests/{id} - Issue request",
+                "PUT",
+                f"/api/acc/internal-requests/{self.test_request_id}",
+                200,
+                data={"status": "Issued"}
+            )
+            if success:
+                status = response.get('status')
+                if status == 'Issued':
+                    self.log(f"   ✅ Request issued", Colors.GREEN)
+                    
+                    # Verify stock decreased (70 - 10 = 60)
+                    success2, response2 = self.test(
+                        "GET /api/acc/stock - Verify stock after issue",
+                        "GET",
+                        "/api/acc/stock",
+                        200
+                    )
+                    if success2:
+                        items = response2 if isinstance(response2, list) else []
+                        item = next((i for i in items if i.get('id') == self.test_item_id), None)
+                        if item:
+                            stock_qty = item.get('stock_qty')
+                            self.log(f"   Stock after issue: {stock_qty}", Colors.CYAN)
+                            if stock_qty == 60:
+                                self.log(f"   ✅ Stock correctly decreased to 60", Colors.GREEN)
+                            else:
+                                self.log(f"   ❌ Expected 60, got {stock_qty}", Colors.RED)
+
+    def test_loans(self):
+        """Test loan workflow"""
+        self.log("\n" + "="*80, Colors.MAGENTA)
+        self.log("SECTION 4: LOANS (acc_loans)", Colors.MAGENTA)
+        self.log("="*80, Colors.MAGENTA)
+        
+        if not self.test_item_id:
+            self.log("⚠️  Skipping loan tests - no test item", Colors.YELLOW)
+            return
+        
+        # 1. Create loan
+        success, response = self.test(
+            "POST /api/acc/loans - Create loan",
+            "POST",
+            "/api/acc/loans",
+            201,
+            data={
+                "borrower_name": "Budi Santoso",
+                "borrower_divisi": "Produksi",
+                "purpose": "Test loan for P1.A validation",
+                "items": [
+                    {
+                        "acc_id": self.test_item_id,
+                        "acc_name": "Test Resleting YKK",
+                        "qty": 5
+                    }
+                ]
+            }
+        )
+        if success:
+            self.test_loan_id = response.get('id')
+            loan_number = response.get('loan_number')
+            status = response.get('status')
+            self.log(f"   Loan ID: {self.test_loan_id}", Colors.CYAN)
+            self.log(f"   Loan number: {loan_number}", Colors.CYAN)
+            self.log(f"   Status: {status}", Colors.CYAN)
+            
+            # Verify stock decreased (60 - 5 = 55)
+            success2, response2 = self.test(
+                "GET /api/acc/stock - Verify stock after loan",
+                "GET",
+                "/api/acc/stock",
+                200
+            )
+            if success2:
+                items = response2 if isinstance(response2, list) else []
+                item = next((i for i in items if i.get('id') == self.test_item_id), None)
+                if item:
+                    stock_qty = item.get('stock_qty')
+                    self.log(f"   Stock after loan: {stock_qty}", Colors.CYAN)
+                    if stock_qty == 55:
+                        self.log(f"   ✅ Stock correctly decreased to 55", Colors.GREEN)
                     else:
-                        self.log(f"   ❌ has_next should be true for page 1 when total > limit", Colors.RED)
-                        self.tests_failed += 1
-                        self.failed_tests.append("has_next validation")
-
-        # Test 2: Page 2 with limit=3
-        self.log("\n   🔹 Test 8.1.2: Page 2 Pagination (page=2, limit=3)", Colors.CYAN)
-        success, data = self.test(
-            "GET /api/wms/stock/unified?page=2&limit=3",
-            "GET",
-            "/api/wms/stock/unified",
-            200,
-            token=self.admin_token,
-            params={"page": 2, "limit": 3}
-        )
-        if success:
-            if data.get('page') == 2:
-                self.log(f"   ✓ Page number correct: {data.get('page')}", Colors.GREEN)
-            else:
-                self.log(f"   ❌ Page number wrong: expected 2, got {data.get('page')}", Colors.RED)
-            
-            if data.get('has_prev') == True:
-                self.log(f"   ✓ has_prev=true for page 2", Colors.GREEN)
-            else:
-                self.log(f"   ❌ has_prev should be true for page 2", Colors.RED)
-                self.tests_failed += 1
-                self.failed_tests.append("has_prev validation for page 2")
-
-        # Test 3: Out-of-range page
-        self.log("\n   🔹 Test 8.1.3: Out-of-range Page (page=999, limit=10)", Colors.CYAN)
-        success, data = self.test(
-            "GET /api/wms/stock/unified?page=999&limit=10",
-            "GET",
-            "/api/wms/stock/unified",
-            200,
-            token=self.admin_token,
-            params={"page": 999, "limit": 10}
-        )
-        if success:
-            items = data.get('items', None)
-            if items is not None and len(items) == 0:
-                self.log(f"   ✓ Out-of-range page returns empty items array", Colors.GREEN)
-            else:
-                self.log(f"   ❌ Out-of-range page should return items=[]", Colors.RED)
-                self.tests_failed += 1
-                self.failed_tests.append("Out-of-range page handling")
-
-        # Test 4: Pagination + filter (inventory_category)
-        self.log("\n   🔹 Test 8.1.4: Pagination + Filter (category=fg_internal)", Colors.CYAN)
-        success, data = self.test(
-            "GET /api/wms/stock/unified?inventory_category=fg_internal&page=1&limit=50",
-            "GET",
-            "/api/wms/stock/unified",
-            200,
-            token=self.admin_token,
-            params={"inventory_category": "fg_internal", "page": 1, "limit": 50}
-        )
-        if success:
-            filters = data.get('filters_applied', {})
-            if filters.get('inventory_category') == 'fg_internal':
-                self.log(f"   ✓ Filter applied correctly: {filters}", Colors.GREEN)
-            else:
-                self.log(f"   ❌ Filter not applied correctly", Colors.RED)
-            
-            # Verify all items match the filter
-            items = data.get('items', [])
-            if items:
-                mismatched = [i for i in items if i.get('inventory_category') != 'fg_internal']
-                if not mismatched:
-                    self.log(f"   ✓ All {len(items)} items match filter", Colors.GREEN)
-                else:
-                    self.log(f"   ❌ {len(mismatched)} items don't match filter", Colors.RED)
-
-        # Test 5: Pagination + search
-        self.log("\n   🔹 Test 8.1.5: Pagination + Search (search=kemeja)", Colors.CYAN)
-        success, data = self.test(
-            "GET /api/wms/stock/unified?search=kemeja&page=1&limit=10",
-            "GET",
-            "/api/wms/stock/unified",
-            200,
-            token=self.admin_token,
-            params={"search": "kemeja", "page": 1, "limit": 10}
-        )
-        if success:
-            filters = data.get('filters_applied', {})
-            if filters.get('search') == 'kemeja':
-                self.log(f"   ✓ Search filter applied: {filters}", Colors.GREEN)
-            items = data.get('items', [])
-            self.log(f"   ✓ Found {len(items)} items matching 'kemeja'", Colors.GREEN)
-
-        # Test 6: Limit clamping (limit=600 should clamp to 500)
-        self.log("\n   🔹 Test 8.1.6: Limit Clamping (limit=600 → 500)", Colors.CYAN)
-        success, data = self.test(
-            "GET /api/wms/stock/unified?limit=600",
-            "GET",
-            "/api/wms/stock/unified",
-            200,
-            token=self.admin_token,
-            params={"limit": 600}
-        )
-        if success:
-            actual_limit = data.get('limit')
-            if actual_limit == 500:
-                self.log(f"   ✓ Limit clamped correctly: 600 → 500", Colors.GREEN)
-            else:
-                self.log(f"   ❌ Limit not clamped: expected 500, got {actual_limit}", Colors.RED)
-                self.tests_failed += 1
-                self.failed_tests.append("Limit clamping to 500")
-
-        # ─── PHASE 8.2: VENDOR PORTAL PROGRESS HISTORY ───
-        self.log("\n📋 PHASE 8.2: VENDOR PORTAL PROGRESS HISTORY", Colors.YELLOW)
+                        self.log(f"   ❌ Expected 55, got {stock_qty}", Colors.RED)
         
-        # First, get vendor jobs to find job IDs
-        if self.vendor1_token:
-            self.log("\n   🔹 Setup: Get Vendor1 Jobs", Colors.CYAN)
-            success, data = self.test(
-                "GET /api/dewi/cmt/vendor/my-jobs (Vendor1)",
-                "GET",
-                "/api/dewi/cmt/vendor/my-jobs",
+        # 2. Return loan
+        if self.test_loan_id:
+            success, response = self.test(
+                "PUT /api/acc/loans/{id}/return - Return loan",
+                "PUT",
+                f"/api/acc/loans/{self.test_loan_id}/return",
                 200,
-                token=self.vendor1_token
-            )
-            if success and data:
-                jobs = data if isinstance(data, list) else []
-                if jobs:
-                    self.vendor1_job_id = jobs[0].get('id')
-                    self.log(f"   ✓ Vendor1 has {len(jobs)} jobs, using job_id: {self.vendor1_job_id}", Colors.GREEN)
-                else:
-                    self.log(f"   ⚠ Vendor1 has no jobs - will skip progress history tests", Colors.YELLOW)
-
-        if self.vendor2_token:
-            self.log("\n   🔹 Setup: Get Vendor2 Jobs", Colors.CYAN)
-            success, data = self.test(
-                "GET /api/dewi/cmt/vendor/my-jobs (Vendor2)",
-                "GET",
-                "/api/dewi/cmt/vendor/my-jobs",
-                200,
-                token=self.vendor2_token
-            )
-            if success and data:
-                jobs = data if isinstance(data, list) else []
-                if jobs:
-                    self.vendor2_job_id = jobs[0].get('id')
-                    self.log(f"   ✓ Vendor2 has {len(jobs)} jobs, using job_id: {self.vendor2_job_id}", Colors.GREEN)
-
-        # Test 7: Vendor1 access their own job progress history
-        if self.vendor1_token and self.vendor1_job_id:
-            self.log("\n   🔹 Test 8.2.1: Vendor1 Access Own Job Progress History", Colors.CYAN)
-            success, data = self.test(
-                f"GET /api/dewi/cmt/vendor/my-jobs/{self.vendor1_job_id}/progress-history",
-                "GET",
-                f"/api/dewi/cmt/vendor/my-jobs/{self.vendor1_job_id}/progress-history",
-                200,
-                token=self.vendor1_token
+                data={"return_notes": "Returned in good condition"}
             )
             if success:
-                # Verify response structure
-                required_fields = ['job', 'reports', 'summary', 'by_step']
-                missing_fields = [f for f in required_fields if f not in data]
-                if missing_fields:
-                    self.log(f"   ❌ Missing fields: {missing_fields}", Colors.RED)
-                    self.tests_failed += 1
-                    self.failed_tests.append("Progress history response structure")
-                else:
-                    self.log(f"   ✓ Response structure valid", Colors.GREEN)
-                    summary = data.get('summary', {})
-                    self.log(f"   ✓ Total reports: {summary.get('total_reports')}", Colors.GREEN)
-                    self.log(f"   ✓ Total processed: {summary.get('total_processed')}", Colors.GREEN)
-                    self.log(f"   ✓ Pass rate: {summary.get('pass_rate_pct')}%", Colors.GREEN)
-                    by_step = data.get('by_step', [])
-                    self.log(f"   ✓ Steps tracked: {len(by_step)}", Colors.GREEN)
+                status = response.get('status')
+                if status == 'Returned':
+                    self.log(f"   ✅ Loan returned", Colors.GREEN)
+                    
+                    # Verify stock increased (55 + 5 = 60)
+                    success2, response2 = self.test(
+                        "GET /api/acc/stock - Verify stock after return",
+                        "GET",
+                        "/api/acc/stock",
+                        200
+                    )
+                    if success2:
+                        items = response2 if isinstance(response2, list) else []
+                        item = next((i for i in items if i.get('id') == self.test_item_id), None)
+                        if item:
+                            stock_qty = item.get('stock_qty')
+                            self.log(f"   Stock after return: {stock_qty}", Colors.CYAN)
+                            if stock_qty == 60:
+                                self.log(f"   ✅ Stock correctly increased to 60", Colors.GREEN)
+                            else:
+                                self.log(f"   ❌ Expected 60, got {stock_qty}", Colors.RED)
 
-        # Test 8: Vendor2 try to access Vendor1's job (should get 403)
-        if self.vendor2_token and self.vendor1_job_id:
-            self.log("\n   🔹 Test 8.2.2: Vendor2 Access Vendor1's Job (403 Expected)", Colors.CYAN)
-            success, data = self.test(
-                f"GET /api/dewi/cmt/vendor/my-jobs/{self.vendor1_job_id}/progress-history (Vendor2)",
-                "GET",
-                f"/api/dewi/cmt/vendor/my-jobs/{self.vendor1_job_id}/progress-history",
-                403,
-                token=self.vendor2_token
-            )
-            if success:
-                self.log(f"   ✓ Correctly blocked with 403", Colors.GREEN)
-
-        # Test 9: Non-existent job_id (should get 404)
-        if self.vendor1_token:
-            self.log("\n   🔹 Test 8.2.3: Non-existent Job ID (404 Expected)", Colors.CYAN)
-            fake_job_id = "nonexistent-job-id-12345"
-            success, data = self.test(
-                f"GET /api/dewi/cmt/vendor/my-jobs/{fake_job_id}/progress-history",
-                "GET",
-                f"/api/dewi/cmt/vendor/my-jobs/{fake_job_id}/progress-history",
-                404,
-                token=self.vendor1_token
-            )
-            if success:
-                self.log(f"   ✓ Correctly returned 404 for non-existent job", Colors.GREEN)
-
-        # Test 10: Admin access any job (should work - bypass vendor check)
-        if self.admin_token and self.vendor1_job_id:
-            self.log("\n   🔹 Test 8.2.4: Admin Access Any Job (Bypass Vendor Check)", Colors.CYAN)
-            success, data = self.test(
-                f"GET /api/dewi/cmt/vendor/my-jobs/{self.vendor1_job_id}/progress-history (Admin)",
-                "GET",
-                f"/api/dewi/cmt/vendor/my-jobs/{self.vendor1_job_id}/progress-history",
-                200,
-                token=self.admin_token
-            )
-            if success:
-                self.log(f"   ✓ Admin can access vendor job (bypass check working)", Colors.GREEN)
-
-        # ─── PHASE 8.3: REGRESSION TESTS ───
-        self.log("\n📋 PHASE 8.3: REGRESSION TESTS", Colors.YELLOW)
+    def test_purchase_requests(self):
+        """Test purchase request workflow"""
+        self.log("\n" + "="*80, Colors.MAGENTA)
+        self.log("SECTION 5: PURCHASE REQUESTS (acc_purchase_requests)", Colors.MAGENTA)
+        self.log("="*80, Colors.MAGENTA)
         
-        # Test 11: Unified inventory summary
-        self.log("\n   🔹 Test 8.3.1: Unified Inventory Summary", Colors.CYAN)
-        success, data = self.test(
-            "GET /api/wms/stock/unified/summary",
-            "GET",
-            "/api/wms/stock/unified/summary",
-            200,
-            token=self.admin_token
+        if not self.test_item_id:
+            self.log("⚠️  Skipping PR tests - no test item", Colors.YELLOW)
+            return
+        
+        # 1. Create PR
+        success, response = self.test(
+            "POST /api/acc/purchase-requests - Create PR",
+            "POST",
+            "/api/acc/purchase-requests",
+            201,
+            data={
+                "priority": "Normal",
+                "purpose": "Restock for testing",
+                "supplier": "YKK Indonesia",
+                "items": [
+                    {
+                        "acc_id": self.test_item_id,
+                        "acc_name": "Test Resleting YKK",
+                        "qty_requested": 200,
+                        "estimated_price": 5000
+                    }
+                ]
+            }
         )
         if success:
-            by_category = data.get('by_category', [])
-            by_ownership = data.get('by_ownership', [])
-            low_stock = data.get('low_stock_count', 0)
-            self.log(f"   ✓ Categories: {len(by_category)}, Ownerships: {len(by_ownership)}, Low stock: {low_stock}", Colors.GREEN)
+            self.test_pr_id = response.get('id')
+            pr_number = response.get('pr_number')
+            status = response.get('status')
+            total = response.get('total_estimated')
+            self.log(f"   PR ID: {self.test_pr_id}", Colors.CYAN)
+            self.log(f"   PR number: {pr_number}", Colors.CYAN)
+            self.log(f"   Status: {status}", Colors.CYAN)
+            self.log(f"   Total estimated: {total}", Colors.CYAN)
+            if status == 'Draft' and total == 1000000:
+                self.log(f"   ✅ PR created correctly", Colors.GREEN)
+        
+        # 2. Submit PR
+        if self.test_pr_id:
+            success, response = self.test(
+                "PUT /api/acc/purchase-requests/{id} - Submit PR",
+                "PUT",
+                f"/api/acc/purchase-requests/{self.test_pr_id}",
+                200,
+                data={"status": "Submitted"}
+            )
+            if success:
+                status = response.get('status')
+                if status == 'Submitted':
+                    self.log(f"   ✅ PR submitted", Colors.GREEN)
+        
+        # 3. Mark as Received (should increase stock)
+        if self.test_pr_id:
+            success, response = self.test(
+                "PUT /api/acc/purchase-requests/{id} - Mark as Received",
+                "PUT",
+                f"/api/acc/purchase-requests/{self.test_pr_id}",
+                200,
+                data={"status": "Received"}
+            )
+            if success:
+                status = response.get('status')
+                if status == 'Received':
+                    self.log(f"   ✅ PR marked as received", Colors.GREEN)
+                    
+                    # Verify stock increased (60 + 200 = 260)
+                    success2, response2 = self.test(
+                        "GET /api/acc/stock - Verify stock after PR receive",
+                        "GET",
+                        "/api/acc/stock",
+                        200
+                    )
+                    if success2:
+                        items = response2 if isinstance(response2, list) else []
+                        item = next((i for i in items if i.get('id') == self.test_item_id), None)
+                        if item:
+                            stock_qty = item.get('stock_qty')
+                            self.log(f"   Stock after PR receive: {stock_qty}", Colors.CYAN)
+                            if stock_qty == 260:
+                                self.log(f"   ✅ Stock correctly increased to 260", Colors.GREEN)
+                            else:
+                                self.log(f"   ❌ Expected 260, got {stock_qty}", Colors.RED)
 
-        # Test 12: Stock adjustment (+1 then -1 to restore)
-        self.log("\n   🔹 Test 8.3.2: Stock Adjustment (Correction +1, then -1)", Colors.CYAN)
+    def test_opname(self):
+        """Test opname (stock taking) workflow"""
+        self.log("\n" + "="*80, Colors.MAGENTA)
+        self.log("SECTION 6: OPNAME (acc_opname_sessions)", Colors.MAGENTA)
+        self.log("="*80, Colors.MAGENTA)
         
-        # First, get a material to adjust
-        success, data = self.test(
-            "GET material for adjustment",
-            "GET",
-            "/api/wms/stock/unified",
-            200,
-            token=self.admin_token,
-            params={"limit": 1}
+        # 1. Start opname session
+        success, response = self.test(
+            "POST /api/acc/opname - Start opname session",
+            "POST",
+            "/api/acc/opname",
+            201,
+            data={"notes": "P1.A validation opname"}
         )
+        if success:
+            self.test_opname_id = response.get('id')
+            ref_number = response.get('ref_number')
+            status = response.get('status')
+            total_items = response.get('total_items')
+            self.log(f"   Opname ID: {self.test_opname_id}", Colors.CYAN)
+            self.log(f"   Ref number: {ref_number}", Colors.CYAN)
+            self.log(f"   Status: {status}", Colors.CYAN)
+            self.log(f"   Total items: {total_items}", Colors.CYAN)
+            if status == 'Active':
+                self.log(f"   ✅ Opname session started", Colors.GREEN)
         
-        if success and data.get('items'):
-            material = data['items'][0]
-            material_id = material.get('material_id')
-            qty_before = material.get('quantity', 0)
-            
-            self.log(f"   ✓ Using material: {material_id} (qty: {qty_before})", Colors.GREEN)
-            
-            # Adjustment +1
-            success, adj_data = self.test(
-                "POST /api/wms/stock/unified/adjust (+1)",
-                "POST",
-                "/api/wms/stock/unified/adjust",
+        # 2. Submit count for test item (counted 258 when system shows 260)
+        if self.test_opname_id and self.test_item_id:
+            success, response = self.test(
+                "PUT /api/acc/opname/{id}/count - Submit count",
+                "PUT",
+                f"/api/acc/opname/{self.test_opname_id}/count",
                 200,
                 data={
-                    "material_id": material_id,
-                    "adjustment_type": "correction",
-                    "qty_delta": 1,
-                    "reason": "Test adjustment +1 for regression test"
-                },
-                token=self.admin_token
+                    "acc_id": self.test_item_id,
+                    "counted_qty": 258,
+                    "notes": "Test count"
+                }
             )
-            
             if success:
-                qty_after_plus = adj_data.get('qty_after', 0)
-                self.log(f"   ✓ Adjustment +1: {qty_before} → {qty_after_plus}", Colors.GREEN)
+                diff = response.get('diff')
+                self.log(f"   Difference: {diff}", Colors.CYAN)
+                if diff == -2:
+                    self.log(f"   ✅ Diff calculated correctly (-2)", Colors.GREEN)
+                else:
+                    self.log(f"   ❌ Expected -2, got {diff}", Colors.RED)
+        
+        # 3. Complete opname (should adjust stock)
+        if self.test_opname_id:
+            success, response = self.test(
+                "POST /api/acc/opname/{id}/complete - Complete opname",
+                "POST",
+                f"/api/acc/opname/{self.test_opname_id}/complete",
+                200
+            )
+            if success:
+                adjustments = response.get('adjustments_made')
+                self.log(f"   Adjustments made: {adjustments}", Colors.CYAN)
                 
-                # Adjustment -1 to restore
-                success, adj_data = self.test(
-                    "POST /api/wms/stock/unified/adjust (-1)",
-                    "POST",
-                    "/api/wms/stock/unified/adjust",
-                    200,
-                    data={
-                        "material_id": material_id,
-                        "adjustment_type": "correction",
-                        "qty_delta": -1,
-                        "reason": "Test adjustment -1 to restore"
-                    },
-                    token=self.admin_token
+                # Verify stock adjusted (260 - 2 = 258)
+                success2, response2 = self.test(
+                    "GET /api/acc/stock - Verify stock after opname",
+                    "GET",
+                    "/api/acc/stock",
+                    200
                 )
-                
-                if success:
-                    qty_after_minus = adj_data.get('qty_after', 0)
-                    self.log(f"   ✓ Adjustment -1: {qty_after_plus} → {qty_after_minus}", Colors.GREEN)
-                    if qty_after_minus == qty_before:
-                        self.log(f"   ✓ Quantity restored to original: {qty_before}", Colors.GREEN)
-                    else:
-                        self.log(f"   ⚠ Quantity not fully restored: expected {qty_before}, got {qty_after_minus}", Colors.YELLOW)
-        else:
-            self.log(f"   ⚠ No materials found for adjustment test", Colors.YELLOW)
+                if success2:
+                    items = response2 if isinstance(response2, list) else []
+                    item = next((i for i in items if i.get('id') == self.test_item_id), None)
+                    if item:
+                        stock_qty = item.get('stock_qty')
+                        self.log(f"   Stock after opname: {stock_qty}", Colors.CYAN)
+                        if stock_qty == 258:
+                            self.log(f"   ✅ Stock correctly adjusted to 258", Colors.GREEN)
+                        else:
+                            self.log(f"   ❌ Expected 258, got {stock_qty}", Colors.RED)
 
-        # Test 13: Phase 7 daily report
-        self.log("\n   🔹 Test 8.3.3: Phase 7 Daily Report", Colors.CYAN)
-        today = date.today().isoformat()
-        success, data = self.test(
-            "GET /api/dewi/reports/daily",
+    def test_dashboard(self):
+        """Test dashboard stats"""
+        self.log("\n" + "="*80, Colors.MAGENTA)
+        self.log("SECTION 7: DASHBOARD", Colors.MAGENTA)
+        self.log("="*80, Colors.MAGENTA)
+        
+        success, response = self.test(
+            "GET /api/acc/dashboard - Get dashboard stats",
             "GET",
-            "/api/dewi/reports/daily",
-            200,
-            token=self.admin_token,
-            params={"date": today}
+            "/api/acc/dashboard",
+            200
         )
         if success:
-            self.log(f"   ✓ Daily report working for date: {today}", Colors.GREEN)
-
-        # Test 14: Phase 7 monthly report
-        self.log("\n   🔹 Test 8.3.4: Phase 7 Monthly Report", Colors.CYAN)
-        now = datetime.now()
-        success, data = self.test(
-            "GET /api/dewi/reports/monthly",
-            "GET",
-            "/api/dewi/reports/monthly",
-            200,
-            token=self.admin_token,
-            params={"year": now.year, "month": now.month}
-        )
-        if success:
-            self.log(f"   ✓ Monthly report working for {now.year}-{now.month:02d}", Colors.GREEN)
-
-        return self.print_summary()
+            self.log(f"   Total items: {response.get('total_items')}", Colors.CYAN)
+            self.log(f"   Out of stock: {response.get('out_of_stock')}", Colors.CYAN)
+            self.log(f"   Low stock: {response.get('low_stock')}", Colors.CYAN)
+            self.log(f"   Pending requests: {response.get('pending_requests')}", Colors.CYAN)
+            self.log(f"   Active loans: {response.get('active_loans')}", Colors.CYAN)
+            self.log(f"   Pending PR: {response.get('pending_pr')}", Colors.CYAN)
+            
+            # After our tests, active_loans should be 0 (returned), pending_requests should be 0 (issued)
+            if response.get('active_loans') == 0 and response.get('pending_requests') == 0:
+                self.log(f"   ✅ Dashboard stats look correct", Colors.GREEN)
 
     def print_summary(self):
         """Print test summary"""
-        self.log("\n" + "="*80, Colors.CYAN)
-        self.log("TEST SUMMARY", Colors.CYAN)
-        self.log("="*80, Colors.CYAN)
+        self.log("\n" + "="*80, Colors.MAGENTA)
+        self.log("TEST SUMMARY", Colors.MAGENTA)
+        self.log("="*80, Colors.MAGENTA)
         
-        total = self.tests_run
-        passed = self.tests_passed
-        failed = self.tests_failed
-        pass_rate = (passed / total * 100) if total > 0 else 0
+        self.log(f"\nTotal Tests: {self.tests_run}", Colors.BLUE)
+        self.log(f"Passed: {self.tests_passed}", Colors.GREEN)
+        self.log(f"Failed: {self.tests_failed}", Colors.RED)
         
-        self.log(f"\nTotal Tests: {total}", Colors.BLUE)
-        self.log(f"Passed: {passed} ({pass_rate:.1f}%)", Colors.GREEN)
-        self.log(f"Failed: {failed}", Colors.RED if failed > 0 else Colors.GREEN)
-        
-        if self.failed_tests:
-            self.log("\n❌ Failed Tests:", Colors.RED)
+        if self.tests_failed > 0:
+            self.log(f"\nFailed Tests:", Colors.RED)
             for test in self.failed_tests:
-                self.log(f"   - {test}", Colors.RED)
+                self.log(f"  - {test}", Colors.RED)
         
-        self.log("\n" + "="*80 + "\n", Colors.CYAN)
+        success_rate = (self.tests_passed / self.tests_run * 100) if self.tests_run > 0 else 0
+        self.log(f"\nSuccess Rate: {success_rate:.1f}%", Colors.CYAN)
         
-        return 0 if failed == 0 else 1
+        if self.tests_failed == 0:
+            self.log("\n🎉 ALL TESTS PASSED! P1.A Accessory Consolidation is working correctly.", Colors.GREEN)
+            return 0
+        else:
+            self.log(f"\n⚠️  {self.tests_failed} test(s) failed. Please review.", Colors.YELLOW)
+            return 1
+
+    def run_all_tests(self):
+        """Run all test suites"""
+        if not self.login():
+            return 1
+        
+        self.test_items_crud()
+        self.test_stock_operations()
+        self.test_internal_requests()
+        self.test_loans()
+        self.test_purchase_requests()
+        self.test_opname()
+        self.test_dashboard()
+        
+        return self.print_summary()
 
 def main():
-    tester = Phase8Tester()
+    tester = AccessoryTester()
     return tester.run_all_tests()
 
 if __name__ == "__main__":
