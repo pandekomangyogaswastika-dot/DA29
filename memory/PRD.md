@@ -1,5 +1,15 @@
 # DA25 ERP — Product Requirements Document
 
+## 🚨 MANDATORY READING UNTUK SETIAP AGENT BARU
+1. `/app/AGENT_DEVELOPMENT_RULES.md` — **Rules anti-tech-debt (WAJIB)**
+2. `/app/NEXT_AGENT_INSTRUCTIONS.md` — Quick start guide
+3. `/app/FORENSIC_00_EXECUTIVE_SUMMARY.md` — Hasil audit forensik
+4. `/app/FORENSIC_11_MIGRATION_ROADMAP.md` — Roadmap eksekusi P0→P3
+
+**Jangan skip pembacaan di atas — sistem ini punya history technical debt yang harus dihindari di session berikutnya.**
+
+---
+
 ## Original Problem Statement
 Pengembangan lanjutan aplikasi ERP CV. Dewi Aditya (DA25). Fokus area:
 - LiveHost Management System (Phase 1-4) — SELESAI
