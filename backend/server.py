@@ -1228,6 +1228,9 @@ from routes.marketing_reports import router as marketing_reports_router
 from routes.universal_import import router as universal_import_router
 from routes.marketing_orders_routes import router as marketing_orders_router
 from routes.marketing_complaints_routes import router as marketing_complaints_router
+# Phase B.1 Toko Cutover — marketing-namespace replacements for legacy /api/dewi/toko/*
+from routes.marketing_toko_dashboard_routes import router as marketing_toko_dashboard_router
+from routes.marketing_toko_sync_routes import router as marketing_toko_sync_router
 from routes.marketing_account_health_routes import router as marketing_health_router
 from routes.marketing_sales_performance_routes import router as marketing_performance_router
 from routes.marketing_ads_routes import router as marketing_ads_router
@@ -1246,6 +1249,9 @@ app.include_router(marketing_targets_router)
 app.include_router(marketing_reports_router)
 app.include_router(marketing_orders_router)
 app.include_router(marketing_complaints_router)
+# Phase B.1 Toko Cutover routers
+app.include_router(marketing_toko_dashboard_router)
+app.include_router(marketing_toko_sync_router)
 app.include_router(marketing_health_router)
 app.include_router(marketing_performance_router)
 app.include_router(marketing_ads_router)

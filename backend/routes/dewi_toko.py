@@ -96,6 +96,12 @@ class _ScopedView:
     async def delete_many(self, query, **kwargs):
         return await self._c.delete_many(self._q(query), **kwargs)
 
+    def aggregate(self, pipeline, **kwargs):
+        """Support aggregate queries with scope filter prepended."""
+        # Prepend $match stage with scope filter
+        scoped_pipeline = [{"$match": self._scope}] + list(pipeline)
+        return self._c.aggregate(scoped_pipeline, **kwargs)
+
 
 class _ScopedCursor:
     """Lightweight async-cursor wrapper that projects results."""

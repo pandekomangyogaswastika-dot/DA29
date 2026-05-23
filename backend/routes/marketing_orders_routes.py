@@ -330,6 +330,131 @@ async def get_order(order_id: str, request: Request):
     return serialize(order)
 
 
+# ── Manual Order Creation (replaces legacy POST /api/dewi/toko/orders) ───────
+
+class OrderItemBody(BaseModel):
+    sku_code: Optional[str] = ""
+    product_name: Optional[str] = ""
+    qty: int = 1
+    price: float = 0.0
+    variant: Optional[str] = ""
+
+
+class OrderCreateBody(BaseModel):
+    # Required
+    platform: str  # shopee | tiktok | tokopedia | manual | website | etc.
+    customer_name: str
+    # Identification
+    order_id: Optional[str] = None  # marketplace reference (auto-gen if blank)
+    account_name: Optional[str] = None
+    # Customer
+    customer_phone: Optional[str] = ""
+    customer_address: Optional[str] = ""
+    city: Optional[str] = ""
+    # Items (can be multi or single)
+    items: List[OrderItemBody] = []
+    # Or single-item flat fields (used when items=[])
+    sku_id: Optional[str] = ""
+    product_name: Optional[str] = ""
+    variation: Optional[str] = ""
+    quantity: int = 1
+    price_original: float = 0.0
+    price_final: float = 0.0
+    # Money
+    total_payment: float = 0.0
+    fee_amount: float = 0.0
+    shipping_cost: float = 0.0
+    # Logistics
+    courier: Optional[str] = ""
+    tracking_number: Optional[str] = None
+    payment_method: Optional[str] = ""
+    note: Optional[str] = ""
+
+
+@router.post("")
+async def create_order(body: OrderCreateBody, request: Request):
+    """Create a manual order in marketing_orders SSOT.
+
+    Replaces legacy POST /api/dewi/toko/orders. Supports both single-item flat
+    shape and multi-item via `items[]`. When items is provided, the primary
+    item populates sku_id/product_name/variation; the full array is preserved.
+    """
+    await require_auth(request)
+    user = _get_user(request)
+    db = get_db()
+
+    # Derive primary item from items array (multi-item case)
+    items_list = [it.dict() for it in body.items] if body.items else []
+    primary = items_list[0] if items_list else {}
+
+    sku_id = body.sku_id or (primary.get("sku_code") if primary else "")
+    product_name = body.product_name or (primary.get("product_name") if primary else "")
+    variation = body.variation or (primary.get("variant") if primary else "")
+    quantity = body.quantity or sum(int(it.get("qty") or 0) for it in items_list) or 1
+    price_final = body.price_final or float(primary.get("price") or 0)
+    price_original = body.price_original or price_final
+    total_payment = body.total_payment or (price_final * quantity + (body.shipping_cost or 0))
+    revenue = total_payment - (body.fee_amount or 0)
+
+    now = _now()
+    new_id = str(uuid.uuid4())
+    order_ref = body.order_id or f"MAN-{now.strftime('%Y%m%d')}-{new_id[:6].upper()}"
+
+    doc = {
+        "id":              new_id,
+        "order_id":        order_ref,
+        "platform":        body.platform,
+        "account_name":    body.account_name or body.platform,
+        "product_name":    product_name,
+        "sku_id":          sku_id,
+        "variation":       variation,
+        "items":           items_list,
+        "quantity":        quantity,
+        "price_original":  price_original,
+        "price_final":     price_final,
+        "discount_seller": max(0.0, price_original - price_final) * quantity,
+        "shipping_cost":   body.shipping_cost or 0,
+        "total_payment":   total_payment,
+        "fee_amount":      body.fee_amount or 0,
+        "net_amount":      revenue,
+        "revenue":         revenue,
+        "payment_method":  body.payment_method or "",
+        "status":          "new",
+        "courier":         body.courier or "",
+        "tracking_number": body.tracking_number,
+        "customer_name":   body.customer_name,
+        "customer_phone":  body.customer_phone or "",
+        "customer_address": body.customer_address or "",
+        "city":            body.city or "",
+        "note":            body.note or "",
+        "order_date":      now,
+        "packed_date":     None,
+        "shipped_date":    None,
+        "delivered_date":  None,
+        "cancelled_date":  None,
+        "_source_type":    "manual_input",
+        "created_by":      user.get("email", "system"),
+        "created_at":      now,
+        "updated_at":      now,
+    }
+    await db.marketing_orders.insert_one(doc)
+    return serialize(doc)
+
+
+@router.delete("/{order_id}")
+async def delete_order(order_id: str, request: Request):
+    """Delete a marketing order. Used for cancel/cleanup workflows."""
+    await require_auth(request)
+    db = get_db()
+    res = await db.marketing_orders.delete_one({"id": order_id})
+    if res.deleted_count == 0:
+        # Try matching by order_id field (display ref)
+        res = await db.marketing_orders.delete_one({"order_id": order_id})
+        if res.deleted_count == 0:
+            raise HTTPException(404, "Order not found")
+    return {"ok": True, "message": "Order deleted"}
+
+
 class StatusUpdateBody(BaseModel):
     status: str
     note: Optional[str] = None

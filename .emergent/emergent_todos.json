@@ -1,34 +1,34 @@
 [
   {
-    "content": "Identifikasi 6 unused vs 6 used endpoints in dewi_maklon.py",
+    "content": "Phase B.1: Backend prep — dashboard + sync endpoints",
     "status": "completed"
   },
   {
-    "content": "Delete MaklonOrderModule.jsx (dead code, redirected) + remove imports",
+    "content": "Phase B.2: Cutover TokoCSReturnsModule -> /api/marketing/returns + /reviews + backfill",
     "status": "completed"
   },
   {
-    "content": "Update MaklonDashboard nav target maklon-po",
+    "content": "Phase B.2: Cutover TokoOrdersModule -> /api/marketing/orders + POST/DELETE endpoints",
     "status": "completed"
   },
   {
-    "content": "Remove 6 unused endpoints (list, get, create, update, confirm, cancel) from dewi_maklon.py",
+    "content": "Phase B.2: Cutover TokoProductCatalogModule -> /api/marketing/catalogs/{toko_legacy}/items + photo endpoints + backfill",
     "status": "completed"
   },
   {
-    "content": "Remove orphan helpers _auto_generate_wos + _build_maklon_wo + MaklonOrder model",
+    "content": "Phase B.2: Cutover TokoChannelManagerModule -> /api/marketing/accounts + sync + legacy-config",
     "status": "completed"
   },
   {
-    "content": "Verify 6 retained endpoints + run 4 POCs - all PASS",
+    "content": "Phase B.2: Cutover TokoDashboardModule -> /api/marketing/dashboard/toko-overview",
     "status": "completed"
   },
   {
-    "content": "testing_agent_v3 iteration_22 - 18/18 PASS (100%) + 4 POCs all pass",
-    "status": "completed"
+    "content": "Phase B.3: Run testing_agent_v3 comprehensive on all 5 modules",
+    "status": "in_progress"
   },
   {
-    "content": "Update PRD.md dengan Phase C summary",
-    "status": "completed"
+    "content": "Phase C: Delete 40 deprecated endpoints in dewi_toko.py / dewi_returns.py / dewi_online_orders.py",
+    "status": "pending"
   }
 ]

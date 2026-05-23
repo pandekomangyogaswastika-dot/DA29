@@ -22,7 +22,8 @@ export default function TokoDashboardModule({ token, onNavigate }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch('/api/dewi/toko/dashboard', { headers });
+      // P1.D Phase B Cutover — now uses marketing namespace endpoint
+      const r = await fetch('/api/marketing/dashboard/toko-overview', { headers });
       if (r.ok) setData(await r.json());
     } finally {
       setLoading(false);
@@ -174,12 +175,12 @@ export default function TokoDashboardModule({ token, onNavigate }) {
                     <GlassCard key={p.id} className="p-3" data-testid={`toko-top-product-${p.id}`}>
                       <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0">
-                          <div className="font-mono text-[11px] text-foreground/55">{p.sku_code}</div>
+                          <div className="font-mono text-[11px] text-foreground/55">{p.sku || p.sku_code}</div>
                           <div className="text-sm font-medium truncate">{p.name}</div>
-                          <div className="text-xs text-foreground/55">{p.category || '-'} · Stok {p.stock_total ?? 0}</div>
+                          <div className="text-xs text-foreground/55">{p.category || '-'} · Stok {p.stock_quantity ?? p.stock_total ?? 0}</div>
                         </div>
                         <div className="text-right">
-                          <div className="text-sm font-semibold tabular-nums">{fmtIDR(p.base_price)}</div>
+                          <div className="text-sm font-semibold tabular-nums">{fmtIDR(p.price ?? p.base_price)}</div>
                           <div className="text-xs text-foreground/55">{p.sales_count_total ?? 0} terjual</div>
                         </div>
                       </div>

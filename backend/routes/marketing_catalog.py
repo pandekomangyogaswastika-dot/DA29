@@ -18,16 +18,26 @@ Author: CV. Dewi Aditya Development Team
 Date: 2026-05-03
 """
 
+import os
+import re
 import uuid
 import html
+from pathlib import Path
 from datetime import datetime, timezone, date
 from typing import Optional, List
-from fastapi import APIRouter, HTTPException, Request, Query
+from fastapi import APIRouter, HTTPException, Request, Query, UploadFile, File
 from pydantic import BaseModel, Field
 from database import get_db
 from auth import require_auth
 
 router = APIRouter(prefix='/api/marketing/catalogs', tags=['Marketing-Catalog'])
+
+# ── Photo upload settings (Phase B Toko cutover) ──────────────────────────────
+PRODUCT_UPLOAD_ROOT = Path('/app/uploads/products')
+PRODUCT_UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
+MAX_PHOTO_BYTES = 5 * 1024 * 1024
+ALLOWED_MIMES = {'image/jpeg', 'image/png', 'image/webp'}
+ALLOWED_EXT = {'jpg', 'jpeg', 'png', 'webp'}
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -505,6 +515,104 @@ async def add_catalog_item(catalog_id: str, data: CatalogItemCreate, request: Re
     await db.marketing_catalog_items.insert_one(doc)
     await _refresh_catalog_stats(db, catalog_id)
     return {'ok': True, 'item': _s(doc)}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PHOTO UPLOAD — Catalog item photos (Phase B Toko Cutover)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class RemovePhotoIn(BaseModel):
+    url: str
+
+
+@router.post('/{catalog_id}/items/{item_id}/photos')
+async def upload_catalog_item_photo(
+    catalog_id: str,
+    item_id: str,
+    file: UploadFile = File(...),
+    request: Request = None,
+):
+    """Upload a photo for a catalog item. Saves under /app/uploads/products/{item_id}/
+    and appends URL to both `images[]` (marketing native) and `photos[]` (legacy)
+    arrays for backwards compatibility.
+    """
+    user = await require_auth(request)
+    db = get_db()
+    item = await db.marketing_catalog_items.find_one(
+        {'id': item_id, 'catalog_id': catalog_id}, {'_id': 0}
+    )
+    if not item:
+        raise HTTPException(404, 'Item tidak ditemukan dalam katalog ini.')
+
+    if file.content_type not in ALLOWED_MIMES:
+        raise HTTPException(415, f'Hanya {sorted(ALLOWED_MIMES)} diizinkan')
+    data = await file.read()
+    if len(data) > MAX_PHOTO_BYTES:
+        raise HTTPException(413, 'Ukuran file > 5MB')
+    if len(data) < 100:
+        raise HTTPException(400, 'File terlalu kecil')
+
+    ext = 'jpg'
+    if file.filename and '.' in file.filename:
+        candidate = file.filename.rsplit('.', 1)[-1].lower()
+        candidate = re.sub(r'[^a-z0-9]', '', candidate)
+        if candidate in ALLOWED_EXT:
+            ext = candidate
+    folder = PRODUCT_UPLOAD_ROOT / item_id
+    folder.mkdir(parents=True, exist_ok=True)
+    fname = f'{uuid.uuid4().hex}.{ext}'
+    with open(folder / fname, 'wb') as f:
+        f.write(data)
+    url = f'/api/uploads/products/{item_id}/{fname}'
+
+    # Dual-write to images[] (marketing native) and photos[] (legacy back-compat)
+    await db.marketing_catalog_items.update_one(
+        {'id': item_id, 'catalog_id': catalog_id},
+        {
+            '$addToSet': {'images': url, 'photos': url},
+            '$set': {'updated_at': _now()},
+        },
+    )
+    return {'ok': True, 'url': url, 'size': len(data)}
+
+
+@router.post('/{catalog_id}/items/{item_id}/photos/remove')
+async def remove_catalog_item_photo(
+    catalog_id: str,
+    item_id: str,
+    payload: RemovePhotoIn,
+    request: Request,
+):
+    """Remove a photo URL from a catalog item. Pulls from both `images[]` and
+    `photos[]` arrays and best-effort deletes the underlying file.
+    """
+    await require_auth(request)
+    db = get_db()
+    item = await db.marketing_catalog_items.find_one(
+        {'id': item_id, 'catalog_id': catalog_id}, {'_id': 0}
+    )
+    if not item:
+        raise HTTPException(404, 'Item tidak ditemukan.')
+
+    await db.marketing_catalog_items.update_one(
+        {'id': item_id, 'catalog_id': catalog_id},
+        {
+            '$pull': {'images': payload.url, 'photos': payload.url},
+            '$set': {'updated_at': _now()},
+        },
+    )
+
+    # Best-effort file delete
+    try:
+        if payload.url.startswith('/api/uploads/products/'):
+            rel = payload.url.replace('/api/uploads/products/', '')
+            fp = PRODUCT_UPLOAD_ROOT / rel
+            if fp.exists() and fp.is_file():
+                os.unlink(fp)
+    except Exception:
+        pass
+
+    return {'ok': True, 'message': 'Foto dihapus'}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

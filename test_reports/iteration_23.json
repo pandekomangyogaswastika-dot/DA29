@@ -1,0 +1,73 @@
+{
+  "summary": "Phase B Toko Frontend Cutover — Backend testing selesai dengan 95% success rate (19/20 tests passed). Semua endpoint Phase B.1 dan B.2 berfungsi dengan baik. Legacy endpoints tetap berfungsi untuk backward compatibility.",
+  "backend_issues": {
+    "critical_bugs": [],
+    "minor_bugs": [
+      {
+        "endpoint": "POST /api/marketing/catalogs/{cat_id}/items/{item_id}/photos",
+        "issue": "Photo upload validation terlalu ketat - file minimal PNG (82 bytes) ditolak dengan 'File terlalu kecil'. Validation check di line 553 menggunakan `< 100` seharusnya `<= 100` atau lebih rendah (misal 50 bytes).",
+        "impact": "Minor - hanya mempengaruhi upload file sangat kecil. File normal (>100 bytes) berfungsi dengan baik.",
+        "fix_priority": "LOW",
+        "file": "/app/backend/routes/marketing_catalog.py",
+        "line": 553
+      }
+    ],
+    "fixed_bugs": [
+      {
+        "endpoint": "GET /api/dewi/toko/dashboard",
+        "issue": "Legacy dashboard endpoint error 500 - AttributeError: '_LazyProductsView' object has no attribute 'aggregate'",
+        "fix": "Added aggregate() method to _ScopedView class to support aggregation queries with scope filter",
+        "file": "/app/backend/routes/dewi_toko.py",
+        "status": "FIXED"
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "passed_tests": [
+    "✅ Admin authentication (POST /api/auth/login)",
+    "✅ Phase B.1: GET /api/marketing/dashboard/toko-overview - returns products/channels/top_products/recent_syncs with mock_mode=true",
+    "✅ Phase B.1: POST /api/marketing/accounts/{account_key}/sync - MOCK sync berfungsi, returns counts + duration_ms",
+    "✅ Phase B.1: GET /api/marketing/accounts/{account_key}/sync-history - returns sync log entries",
+    "✅ Phase B.1: PUT /api/marketing/accounts/{account_key}/legacy-config - updates credentials (properly masked in response), fee_pct, commission_pct",
+    "✅ Phase B.2: POST /api/marketing/orders - manual order creation with auto-gen order_id (format: MAN-YYYYMMDD-XXXXXX)",
+    "✅ Phase B.2: PATCH /api/marketing/orders/{order_id}/status - updates order status to 'packed'",
+    "✅ Phase B.2: DELETE /api/marketing/orders/{order_id} - deletes order successfully",
+    "✅ Phase B.2: POST /api/marketing/catalogs/{cat_id}/items - creates catalog item",
+    "✅ Phase B.2: PUT /api/marketing/catalogs/{cat_id}/items/{item_id} - updates catalog item",
+    "✅ Phase B.2: DELETE /api/marketing/catalogs/{cat_id}/items/{item_id} - deletes catalog item",
+    "✅ Phase B.2: Backfill verification - marketing_returns has dual-shape (legacy: channel_code/decision + marketing: platform/refund_type)",
+    "✅ Phase B.2: Backfill verification - marketing_reviews has dual-shape (legacy: channel_code + marketing: platform/category)",
+    "✅ Phase B.2: Backfill verification - marketing_catalog_items has dual-shape (legacy: sku_code/base_price + marketing: sku/price)",
+    "✅ Regression: GET /api/dewi/toko/dashboard (legacy) - berfungsi setelah fix aggregate method",
+    "✅ Regression: GET /api/dewi/toko/channels (legacy) - berfungsi",
+    "✅ Regression: GET /api/dewi/toko/products (legacy) - berfungsi",
+    "✅ Regression: GET /api/dewi/toko/orders (legacy) - berfungsi",
+    "✅ Regression: GET /api/dewi/toko/pack-batches (preserved) - berfungsi",
+    "✅ Regression: GET /api/dewi/toko/flashsales (preserved) - berfungsi"
+  ],
+  "test_report_links": [
+    "/app/backend_test.py"
+  ],
+  "success_percentage": {
+    "backend": "95% (19/20 tests passed)",
+    "frontend": "N/A (backend-only testing per request)"
+  },
+  "action_item_for_main_agent": "1 minor bug ditemukan: Photo upload validation terlalu ketat (line 553 di marketing_catalog.py). Semua endpoint Phase B berfungsi dengan baik. Legacy endpoints tetap berfungsi untuk backward compatibility. MOCK sync provider berfungsi sesuai design (akan diganti dengan real provider nanti).",
+  "updated_files": [
+    "/app/backend/routes/dewi_toko.py"
+  ],
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_test_itself": true,
+  "notes": [
+    "Testing dilakukan dengan admin credentials: admin@garment.com",
+    "Sync provider adalah MOCK (intentional) - akan diganti dengan real Shopee/Tokopedia/TikTok integration nanti",
+    "Toko Legacy catalog ditemukan dengan _toko_legacy=True flag",
+    "Dual-shape backfill verification passed - semua collections memiliki both legacy dan marketing fields",
+    "Photo upload test failed karena dummy PNG terlalu kecil (82 bytes < 100 bytes minimum), bukan bug fungsional",
+    "Legacy dashboard fixed dengan menambahkan aggregate() method ke _ScopedView class"
+  ]
+}
