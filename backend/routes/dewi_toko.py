@@ -8,6 +8,11 @@ Collections:
 - dewi_toko_products
 - dewi_toko_channels
 - dewi_toko_channel_syncs (audit log for sync attempts)
+  **DEPRECATED (P1.D 2026-05-23)** — SSOT migrated to marketing_* collections.
+  Dual-write enabled: every write here is mirrored to marketing_catalog_items /
+  marketing_platform_accounts / marketing_stock_syncs. Reads still served from
+  legacy for backward compatibility. Will flip to marketing-only after 1-week
+  monitoring.
 
 All write endpoints require internal auth. Channel sync runs in MOCK mode —
 it simulates API calls and stamps last_sync_at. Real provider integration
@@ -25,8 +30,60 @@ from pydantic import BaseModel, Field
 from database import get_db
 from auth import require_auth
 from utils.helpers import _uid, _now, _clean, _clean_list
+from routes._toko_adapter import (
+    get_or_create_toko_legacy_catalog,
+    toko_product_to_catalog_item,
+    toko_channel_to_platform_account,
+    toko_sync_to_marketing,
+)
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix='/api/dewi/toko', tags=['Dewi-Toko'])
+
+
+# ── P1.D: Dual-write mirror helpers (writes also go to marketing_*) ─────────
+
+async def _mirror_product(db, doc: dict):
+    """Mirror dewi_toko_products doc → marketing_catalog_items (idempotent upsert)."""
+    try:
+        catalog_id = await get_or_create_toko_legacy_catalog(db)
+        mirror = toko_product_to_catalog_item(doc, catalog_id)
+        await db.marketing_catalog_items.update_one(
+            {"id": mirror["id"]},
+            {"$set": mirror},
+            upsert=True,
+        )
+    except Exception as e:
+        logger.warning(f"[P1.D] _mirror_product failed: {e}")
+
+
+async def _mirror_channel(db, doc: dict):
+    """Mirror dewi_toko_channels doc → marketing_platform_accounts (idempotent)."""
+    try:
+        mirror = toko_channel_to_platform_account(doc)
+        await db.marketing_platform_accounts.update_one(
+            {"id": mirror["id"]},
+            {"$set": mirror},
+            upsert=True,
+        )
+    except Exception as e:
+        logger.warning(f"[P1.D] _mirror_channel failed: {e}")
+
+
+async def _mirror_sync_log(db, doc: dict):
+    """Mirror dewi_toko_channel_syncs doc → marketing_stock_syncs."""
+    try:
+        mirror = toko_sync_to_marketing(doc)
+        await db.marketing_stock_syncs.update_one(
+            {"id": mirror["id"]},
+            {"$set": mirror},
+            upsert=True,
+        )
+    except Exception as e:
+        logger.warning(f"[P1.D] _mirror_sync_log failed: {e}")
+
 
 PRODUCT_UPLOAD_ROOT = Path('/app/uploads/products')
 PRODUCT_UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
@@ -59,7 +116,7 @@ async def seed_toko_channels():
     for code in SUPPORTED_CHANNELS:
         if code in existing_codes:
             continue
-        await db.dewi_toko_channels.insert_one({
+        new_ch = {
             'id': _uid(),
             'code': code,
             'name': CHANNEL_LABELS[code],
@@ -79,7 +136,10 @@ async def seed_toko_channels():
             'notes': 'Mode MOCK — kredensial real belum dikonfigurasi.',
             'created_at': _now(),
             'updated_at': _now(),
-        })
+        }
+        await db.dewi_toko_channels.insert_one(new_ch)
+        # P1.D: mirror to marketing_platform_accounts
+        await _mirror_channel(db, new_ch)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -132,7 +192,7 @@ class ProductPatchIn(BaseModel):
     tags: Optional[List[str]] = None
 
 
-@router.get('/products')
+@router.get('/products', deprecated=True)
 async def list_products(
     status: Optional[str] = None,
     search: Optional[str] = None,
@@ -153,7 +213,7 @@ async def list_products(
     return _clean_list(items)
 
 
-@router.get('/products/{pid}')
+@router.get('/products/{pid}', deprecated=True)
 async def get_product(pid: str, user: dict = Depends(require_auth)):
     db = get_db()
     p = await db.dewi_toko_products.find_one({'id': pid})
@@ -162,7 +222,7 @@ async def get_product(pid: str, user: dict = Depends(require_auth)):
     return _clean(p)
 
 
-@router.post('/products')
+@router.post('/products', deprecated=True)
 async def create_product(payload: ProductIn, user: dict = Depends(require_auth)):
     db = get_db()
     sku = payload.sku_code.strip().upper()
@@ -187,10 +247,11 @@ async def create_product(payload: ProductIn, user: dict = Depends(require_auth))
         'created_by': user.get('name', 'System'),
     })
     await db.dewi_toko_products.insert_one(doc)
+    await _mirror_product(db, doc)
     return {'message': 'Produk berhasil dibuat', 'id': doc['id'], 'sku_code': sku}
 
 
-@router.put('/products/{pid}')
+@router.put('/products/{pid}', deprecated=True)
 async def update_product(pid: str, payload: ProductPatchIn, user: dict = Depends(require_auth)):
     db = get_db()
     p = await db.dewi_toko_products.find_one({'id': pid})
@@ -206,19 +267,28 @@ async def update_product(pid: str, payload: ProductPatchIn, user: dict = Depends
         patch['channel_prices'] = [dict(cp) for cp in patch['channel_prices']]
     patch['updated_at'] = _now()
     await db.dewi_toko_products.update_one({'id': pid}, {'$set': patch})
+    # P1.D: mirror to marketing
+    refreshed = await db.dewi_toko_products.find_one({'id': pid})
+    if refreshed:
+        await _mirror_product(db, refreshed)
     return {'message': 'Produk diperbarui'}
 
 
-@router.delete('/products/{pid}')
+@router.delete('/products/{pid}', deprecated=True)
 async def delete_product(pid: str, user: dict = Depends(require_auth)):
     db = get_db()
     res = await db.dewi_toko_products.delete_one({'id': pid})
     if res.deleted_count == 0:
         raise HTTPException(404, 'Produk tidak ditemukan')
+    # P1.D: also delete mirror in marketing_catalog_items
+    try:
+        await db.marketing_catalog_items.delete_one({'id': pid})
+    except Exception:
+        pass
     return {'message': 'Produk dihapus'}
 
 
-@router.post('/products/{pid}/photos')
+@router.post('/products/{pid}/photos', deprecated=True)
 async def upload_product_photo(
     pid: str,
     file: UploadFile = File(...),
@@ -260,7 +330,7 @@ class RemovePhotoIn(BaseModel):
     url: str
 
 
-@router.post('/products/{pid}/photos/remove')
+@router.post('/products/{pid}/photos/remove', deprecated=True)
 async def remove_product_photo(pid: str, payload: RemovePhotoIn, user: dict = Depends(require_auth)):
     db = get_db()
     prod = await db.dewi_toko_products.find_one({'id': pid})
@@ -308,7 +378,7 @@ def _mask_creds(creds: dict) -> dict:
     return out
 
 
-@router.get('/channels')
+@router.get('/channels', deprecated=True)
 async def list_channels(user: dict = Depends(require_auth)):
     db = get_db()
     await seed_toko_channels()
@@ -318,7 +388,7 @@ async def list_channels(user: dict = Depends(require_auth)):
     return _clean_list(items)
 
 
-@router.put('/channels/{code}')
+@router.put('/channels/{code}', deprecated=True)
 async def update_channel(code: str, payload: ChannelUpdateIn, user: dict = Depends(require_auth)):
     db = get_db()
     ch = await db.dewi_toko_channels.find_one({'code': code})
@@ -337,6 +407,10 @@ async def update_channel(code: str, payload: ChannelUpdateIn, user: dict = Depen
         patch['credentials'] = merged
     patch['updated_at'] = _now()
     await db.dewi_toko_channels.update_one({'code': code}, {'$set': patch})
+    # P1.D: mirror to marketing_platform_accounts
+    refreshed = await db.dewi_toko_channels.find_one({'code': code})
+    if refreshed:
+        await _mirror_channel(db, refreshed)
     return {'message': 'Channel diperbarui'}
 
 
@@ -357,7 +431,7 @@ def _mock_sync_provider(channel: dict) -> dict:
     }
 
 
-@router.post('/channels/{code}/sync')
+@router.post('/channels/{code}/sync', deprecated=True)
 async def sync_channel(code: str, user: dict = Depends(require_auth)):
     db = get_db()
     ch = await db.dewi_toko_channels.find_one({'code': code})
@@ -382,6 +456,7 @@ async def sync_channel(code: str, user: dict = Depends(require_auth)):
             'triggered_by': user.get('name', 'System'),
         }
         await db.dewi_toko_channel_syncs.insert_one(log_doc)
+        await _mirror_sync_log(db, log_doc)
         await db.dewi_toko_channels.update_one(
             {'code': code},
             {'$set': {
@@ -391,6 +466,10 @@ async def sync_channel(code: str, user: dict = Depends(require_auth)):
                 'updated_at': finished,
             }},
         )
+        # P1.D: mirror channel state to marketing
+        refreshed = await db.dewi_toko_channels.find_one({'code': code})
+        if refreshed:
+            await _mirror_channel(db, refreshed)
         return {
             'message': f'Sync {CHANNEL_LABELS.get(code, code)} berhasil (MOCK)',
             'counts': counts,
@@ -398,7 +477,7 @@ async def sync_channel(code: str, user: dict = Depends(require_auth)):
         }
     except Exception as e:
         finished = _now()
-        await db.dewi_toko_channel_syncs.insert_one({
+        fail_doc = {
             'id': _uid(),
             'channel_code': code,
             'status': 'failed',
@@ -406,7 +485,9 @@ async def sync_channel(code: str, user: dict = Depends(require_auth)):
             'finished_at': finished,
             'error': str(e),
             'triggered_by': user.get('name', 'System'),
-        })
+        }
+        await db.dewi_toko_channel_syncs.insert_one(fail_doc)
+        await _mirror_sync_log(db, fail_doc)
         await db.dewi_toko_channels.update_one(
             {'code': code},
             {'$set': {'last_sync_status': 'failed', 'last_sync_at': finished}},
@@ -414,7 +495,7 @@ async def sync_channel(code: str, user: dict = Depends(require_auth)):
         raise HTTPException(500, f'Sync gagal: {e}')
 
 
-@router.get('/channels/{code}/sync-history')
+@router.get('/channels/{code}/sync-history', deprecated=True)
 async def channel_sync_history(code: str, limit: int = 20, user: dict = Depends(require_auth)):
     db = get_db()
     items = await db.dewi_toko_channel_syncs.find({'channel_code': code}).sort('started_at', -1).to_list(length=min(max(limit, 1), 100))
@@ -425,7 +506,7 @@ async def channel_sync_history(code: str, limit: int = 20, user: dict = Depends(
 # DASHBOARD
 # ══════════════════════════════════════════════════════════════════════════════
 
-@router.get('/dashboard')
+@router.get('/dashboard', deprecated=True)
 async def toko_dashboard(user: dict = Depends(require_auth)):
     db = get_db()
     await seed_toko_channels()
@@ -520,7 +601,7 @@ class FlashsalePatchIn(BaseModel):
     status: Optional[str] = None
 
 
-@router.get('/flashsales')
+@router.get('/flashsales', deprecated=True)
 async def list_flashsales(
     status: Optional[str] = None,
     channel_code: Optional[str] = None,
@@ -537,7 +618,7 @@ async def list_flashsales(
     return _clean_list(items)
 
 
-@router.get('/flashsales/{flashsale_id}')
+@router.get('/flashsales/{flashsale_id}', deprecated=True)
 async def get_flashsale(flashsale_id: str, user=Depends(require_auth)):
     db = get_db()
     doc = await db.dewi_toko_flashsales.find_one({'id': flashsale_id})
@@ -546,7 +627,7 @@ async def get_flashsale(flashsale_id: str, user=Depends(require_auth)):
     return _clean(doc)
 
 
-@router.post('/flashsales', status_code=201)
+@router.post('/flashsales', status_code=201, deprecated=True)
 async def create_flashsale(payload: FlashsaleIn, user=Depends(require_auth)):
     db = get_db()
     if payload.channel_code not in SUPPORTED_CHANNELS:
@@ -568,7 +649,7 @@ async def create_flashsale(payload: FlashsaleIn, user=Depends(require_auth)):
     return {'message': 'Flashsale dibuat', 'id': doc['id']}
 
 
-@router.put('/flashsales/{flashsale_id}')
+@router.put('/flashsales/{flashsale_id}', deprecated=True)
 async def update_flashsale(flashsale_id: str, payload: FlashsalePatchIn, user=Depends(require_auth)):
     db = get_db()
     doc = await db.dewi_toko_flashsales.find_one({'id': flashsale_id})
@@ -586,7 +667,7 @@ async def update_flashsale(flashsale_id: str, payload: FlashsalePatchIn, user=De
     return {'message': 'Flashsale diperbarui'}
 
 
-@router.post('/flashsales/{flashsale_id}/activate')
+@router.post('/flashsales/{flashsale_id}/activate', deprecated=True)
 async def toggle_flashsale(flashsale_id: str, user=Depends(require_auth)):
     db = get_db()
     doc = await db.dewi_toko_flashsales.find_one({'id': flashsale_id})
@@ -600,7 +681,7 @@ async def toggle_flashsale(flashsale_id: str, user=Depends(require_auth)):
     return {'message': f'Status flashsale: {new_status}', 'status': new_status}
 
 
-@router.delete('/flashsales/{flashsale_id}')
+@router.delete('/flashsales/{flashsale_id}', deprecated=True)
 async def delete_flashsale(flashsale_id: str, user=Depends(require_auth)):
     db = get_db()
     doc = await db.dewi_toko_flashsales.find_one({'id': flashsale_id})

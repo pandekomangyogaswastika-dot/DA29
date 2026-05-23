@@ -1,34 +1,38 @@
 [
   {
-    "content": "Phase 1 (POC): poc_p2p_flow.py - PASS 13/13",
+    "content": "Phase 1: _toko_adapter.py - adapter dengan 12 fungsi konversi",
     "status": "completed"
   },
   {
-    "content": "Phase 2: POST /api/rahaza/purchase-orders/{po_id}/create-gr + GET /remaining + GET /grs",
+    "content": "Phase 2: POC poc_toko_consolidation.py - PASS 10/10",
     "status": "completed"
   },
   {
-    "content": "Phase 3: Over-receive validation in warehouse.py update_receiving",
+    "content": "Phase 3: dewi_toko.py - dual-write helpers + mirror calls + 18 deprecated",
     "status": "completed"
   },
   {
-    "content": "Phase 4a: PurchaseOrderModule.jsx - createGRFromPO + GR audit trail in detail",
+    "content": "Phase 4: dewi_online_orders.py - dual-write helper + mirror_order calls + 10 deprecated",
     "status": "completed"
   },
   {
-    "content": "Phase 4b: ReceivingModule.jsx - 'From PO' badge + deep-link",
+    "content": "Phase 5: dewi_returns.py - dual-write helpers + mirror_return/review + 12 deprecated",
     "status": "completed"
   },
   {
-    "content": "Phase 4c: App.js - extend handleNavigate dengan deepLinkParams",
+    "content": "Phase 6: 40 endpoint /api/dewi/toko/* sebagai deprecated=True - VERIFIED 40/40 via OpenAPI",
     "status": "completed"
   },
   {
-    "content": "Phase 5: testing_agent_v3 - 23/23 PASS (100%)",
+    "content": "Phase 7: migrate_toko_data.py - dry-run + execute idempotent OK",
     "status": "completed"
   },
   {
-    "content": "Update PRD.md dan plan.md dengan progress P1.C",
-    "status": "completed"
+    "content": "Phase 8: testing_agent_v3 - end-to-end Toko flow validation",
+    "status": "in_progress"
+  },
+  {
+    "content": "Update PRD.md dan plan.md dengan progress P1.D",
+    "status": "pending"
   }
 ]

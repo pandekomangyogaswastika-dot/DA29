@@ -7,6 +7,7 @@ CV. Dewi Aditya — Phase 5B: Returns, Refunds & Customer Service
 Collections:
 - dewi_toko_returns
 - dewi_toko_reviews
+  **DEPRECATED (P1.D 2026-05-23)** — dual-write to marketing_returns / marketing_reviews SSOT.
 """
 import re
 from datetime import datetime, timezone
@@ -16,8 +17,40 @@ from pydantic import BaseModel, Field
 from database import get_db
 from auth import require_auth
 from utils.helpers import _uid, _now, _clean, _clean_list, _next_code
+from routes._toko_adapter import toko_return_to_marketing, toko_review_to_marketing
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix='/api/dewi/toko', tags=['Dewi-Toko-CS'])
+
+
+# P1.D: Dual-write helpers
+async def _mirror_return(db, doc: dict):
+    """Mirror dewi_toko_returns → marketing_returns (idempotent upsert)."""
+    try:
+        mirror = toko_return_to_marketing(doc)
+        await db.marketing_returns.update_one(
+            {"id": mirror["id"]},
+            {"$set": mirror},
+            upsert=True,
+        )
+    except Exception as e:
+        logger.warning(f"[P1.D] _mirror_return failed: {e}")
+
+
+async def _mirror_review(db, doc: dict):
+    """Mirror dewi_toko_reviews → marketing_reviews (idempotent upsert)."""
+    try:
+        mirror = toko_review_to_marketing(doc)
+        await db.marketing_reviews.update_one(
+            {"id": mirror["id"]},
+            {"$set": mirror},
+            upsert=True,
+        )
+    except Exception as e:
+        logger.warning(f"[P1.D] _mirror_review failed: {e}")
+
 
 RETURN_TYPES = ['expedition_return', 'customer_refund']
 RETURN_STATUSES = ['new', 'investigating', 'decision_made', 'resolved', 'closed']
@@ -61,7 +94,7 @@ class ReviewResponseIn(BaseModel):
 
 # ── RETURNS ───────────────────────────────────────────────────────────────────
 
-@router.get('/returns')
+@router.get('/returns', deprecated=True)
 async def list_returns(
     return_type: Optional[str] = None,
     status: Optional[str] = None,
@@ -85,7 +118,7 @@ async def list_returns(
     return _clean_list(items)
 
 
-@router.get('/returns/summary')
+@router.get('/returns/summary', deprecated=True)
 async def returns_summary(user=Depends(require_auth)):
     db = get_db()
     new_count = await db.dewi_toko_returns.count_documents({'status': 'new'})
@@ -100,7 +133,7 @@ async def returns_summary(user=Depends(require_auth)):
     }
 
 
-@router.get('/returns/{return_id}')
+@router.get('/returns/{return_id}', deprecated=True)
 async def get_return(return_id: str, user=Depends(require_auth)):
     db = get_db()
     doc = await db.dewi_toko_returns.find_one({'id': return_id})
@@ -109,7 +142,7 @@ async def get_return(return_id: str, user=Depends(require_auth)):
     return _clean(doc)
 
 
-@router.post('/returns', status_code=201)
+@router.post('/returns', status_code=201, deprecated=True)
 async def create_return(payload: ReturnIn, user=Depends(require_auth)):
     db = get_db()
     if payload.return_type not in RETURN_TYPES:
@@ -136,10 +169,11 @@ async def create_return(payload: ReturnIn, user=Depends(require_auth)):
         'updated_at': _now(),
     }
     await db.dewi_toko_returns.insert_one(doc)
+    await _mirror_return(db, doc)
     return {'message': 'Kasus return dibuat', 'id': doc['id'], 'return_code': code}
 
 
-@router.put('/returns/{return_id}')
+@router.put('/returns/{return_id}', deprecated=True)
 async def update_return(return_id: str, payload: ReturnPatchIn, user=Depends(require_auth)):
     db = get_db()
     doc = await db.dewi_toko_returns.find_one({'id': return_id})
@@ -150,10 +184,13 @@ async def update_return(return_id: str, payload: ReturnPatchIn, user=Depends(req
         raise HTTPException(status_code=422, detail='Tidak ada field yang diupdate')
     patch['updated_at'] = _now()
     await db.dewi_toko_returns.update_one({'id': return_id}, {'$set': patch})
+    refreshed = await db.dewi_toko_returns.find_one({'id': return_id})
+    if refreshed:
+        await _mirror_return(db, refreshed)
     return {'message': 'Return diperbarui'}
 
 
-@router.post('/returns/{return_id}/decision')
+@router.post('/returns/{return_id}/decision', deprecated=True)
 async def make_return_decision(return_id: str, payload: ReturnDecisionIn, user=Depends(require_auth)):
     db = get_db()
     doc = await db.dewi_toko_returns.find_one({'id': return_id})
@@ -173,10 +210,13 @@ async def make_return_decision(return_id: str, payload: ReturnDecisionIn, user=D
         patch['status'] = 'resolved'
         patch['resolved_at'] = _now().isoformat()
     await db.dewi_toko_returns.update_one({'id': return_id}, {'$set': patch})
+    refreshed = await db.dewi_toko_returns.find_one({'id': return_id})
+    if refreshed:
+        await _mirror_return(db, refreshed)
     return {'message': f'Keputusan: {payload.decision}'}
 
 
-@router.delete('/returns/{return_id}')
+@router.delete('/returns/{return_id}', deprecated=True)
 async def delete_return(return_id: str, user=Depends(require_auth)):
     db = get_db()
     doc = await db.dewi_toko_returns.find_one({'id': return_id})
@@ -188,7 +228,7 @@ async def delete_return(return_id: str, user=Depends(require_auth)):
 
 # ── REVIEWS (CS) ──────────────────────────────────────────────────────────────
 
-@router.get('/reviews')
+@router.get('/reviews', deprecated=True)
 async def list_reviews(
     status: Optional[str] = None,
     channel_code: Optional[str] = None,
@@ -211,7 +251,7 @@ async def list_reviews(
     return _clean_list(items)
 
 
-@router.post('/reviews', status_code=201)
+@router.post('/reviews', status_code=201, deprecated=True)
 async def create_review(payload: ReviewIn, user=Depends(require_auth)):
     db = get_db()
     doc = {
@@ -229,10 +269,11 @@ async def create_review(payload: ReviewIn, user=Depends(require_auth)):
         'updated_at': _now(),
     }
     await db.dewi_toko_reviews.insert_one(doc)
+    await _mirror_review(db, doc)
     return {'message': 'Review dicatat', 'id': doc['id']}
 
 
-@router.put('/reviews/{review_id}/respond')
+@router.put('/reviews/{review_id}/respond', deprecated=True)
 async def respond_review(review_id: str, payload: ReviewResponseIn, user=Depends(require_auth)):
     db = get_db()
     doc = await db.dewi_toko_reviews.find_one({'id': review_id})
@@ -247,10 +288,13 @@ async def respond_review(review_id: str, payload: ReviewResponseIn, user=Depends
             'updated_at': _now(),
         }}
     )
+    refreshed = await db.dewi_toko_reviews.find_one({'id': review_id})
+    if refreshed:
+        await _mirror_review(db, refreshed)
     return {'message': 'Respons disimpan'}
 
 
-@router.put('/reviews/{review_id}/flag')
+@router.put('/reviews/{review_id}/flag', deprecated=True)
 async def flag_review(review_id: str, user=Depends(require_auth)):
     db = get_db()
     doc = await db.dewi_toko_reviews.find_one({'id': review_id})
@@ -260,10 +304,13 @@ async def flag_review(review_id: str, user=Depends(require_auth)):
         {'id': review_id},
         {'$set': {'status': 'flagged', 'updated_at': _now()}}
     )
+    refreshed = await db.dewi_toko_reviews.find_one({'id': review_id})
+    if refreshed:
+        await _mirror_review(db, refreshed)
     return {'message': 'Review diflag'}
 
 
-@router.delete('/reviews/{review_id}')
+@router.delete('/reviews/{review_id}', deprecated=True)
 async def delete_review(review_id: str, user=Depends(require_auth)):
     db = get_db()
     doc = await db.dewi_toko_reviews.find_one({'id': review_id})

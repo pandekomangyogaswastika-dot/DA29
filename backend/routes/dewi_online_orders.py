@@ -7,7 +7,8 @@ CV. Dewi Aditya — Phase 5B: Online Orders Management
 
 Collections:
 - dewi_toko_orders
-- dewi_toko_pack_batches
+  **DEPRECATED (P1.D 2026-05-23)** — dual-write to marketing_orders SSOT.
+- dewi_toko_pack_batches (preserved, no marketing equivalent)
 """
 import re
 from datetime import datetime, timezone
@@ -17,8 +18,27 @@ from pydantic import BaseModel, Field
 from database import get_db
 from auth import require_auth
 from utils.helpers import _uid, _now, _clean, _clean_list, _next_code
+from routes._toko_adapter import toko_order_to_marketing
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix='/api/dewi/toko', tags=['Dewi-Toko-Orders'])
+
+
+# P1.D: Dual-write helper
+async def _mirror_order(db, doc: dict):
+    """Mirror dewi_toko_orders → marketing_orders (idempotent upsert)."""
+    try:
+        mirror = toko_order_to_marketing(doc)
+        await db.marketing_orders.update_one(
+            {"id": mirror["id"]},
+            {"$set": mirror},
+            upsert=True,
+        )
+    except Exception as e:
+        logger.warning(f"[P1.D] _mirror_order failed: {e}")
+
 
 ORDER_STATUSES = ['new', 'packed', 'shipped', 'delivered', 'closed', 'cancelled']
 CHANNEL_CODES = ['shopee', 'tokopedia', 'tiktok_shop', 'website', 'manual']
@@ -80,7 +100,7 @@ async def _get_order_or_404(db, order_id: str):
 
 # ── ORDERS ────────────────────────────────────────────────────────────────────
 
-@router.get('/orders')
+@router.get('/orders', deprecated=True)
 async def list_orders(
     status: Optional[str] = None,
     channel_code: Optional[str] = None,
@@ -106,7 +126,7 @@ async def list_orders(
     return _clean_list(items)
 
 
-@router.get('/orders/summary')
+@router.get('/orders/summary', deprecated=True)
 async def orders_summary(user=Depends(require_auth)):
     db = get_db()
     new_count = await db.dewi_toko_orders.count_documents({'status': 'new'})
@@ -128,13 +148,13 @@ async def orders_summary(user=Depends(require_auth)):
     }
 
 
-@router.get('/orders/{order_id}')
+@router.get('/orders/{order_id}', deprecated=True)
 async def get_order(order_id: str, user=Depends(require_auth)):
     db = get_db()
     return _clean(await _get_order_or_404(db, order_id))
 
 
-@router.post('/orders', status_code=201)
+@router.post('/orders', status_code=201, deprecated=True)
 async def create_order(payload: OrderIn, user=Depends(require_auth)):
     db = get_db()
     code = await _next_code(db, 'ORD', 'dewi_toko_orders', 'order_number')
@@ -164,10 +184,11 @@ async def create_order(payload: OrderIn, user=Depends(require_auth)):
         'updated_at': _now(),
     }
     await db.dewi_toko_orders.insert_one(doc)
+    await _mirror_order(db, doc)
     return {'message': 'Order dibuat', 'id': doc['id'], 'order_number': code}
 
 
-@router.put('/orders/{order_id}')
+@router.put('/orders/{order_id}', deprecated=True)
 async def update_order(order_id: str, payload: OrderPatchIn, user=Depends(require_auth)):
     db = get_db()
     doc = await _get_order_or_404(db, order_id)
@@ -184,10 +205,13 @@ async def update_order(order_id: str, payload: OrderPatchIn, user=Depends(requir
         raise HTTPException(status_code=422, detail='Tidak ada field yang diupdate')
     patch['updated_at'] = _now()
     await db.dewi_toko_orders.update_one({'id': order_id}, {'$set': patch})
+    refreshed = await db.dewi_toko_orders.find_one({'id': order_id})
+    if refreshed:
+        await _mirror_order(db, refreshed)
     return {'message': 'Order diperbarui'}
 
 
-@router.post('/orders/{order_id}/status')
+@router.post('/orders/{order_id}/status', deprecated=True)
 async def update_order_status(order_id: str, payload: OrderStatusIn, user=Depends(require_auth)):
     db = get_db()
     doc = await _get_order_or_404(db, order_id)
@@ -203,10 +227,13 @@ async def update_order_status(order_id: str, payload: OrderStatusIn, user=Depend
     if payload.status == 'shipped':
         patch['shipped_at'] = _now().isoformat()
     await db.dewi_toko_orders.update_one({'id': order_id}, {'$set': patch})
+    refreshed = await db.dewi_toko_orders.find_one({'id': order_id})
+    if refreshed:
+        await _mirror_order(db, refreshed)
     return {'message': f'Status diperbarui ke {payload.status}'}
 
 
-@router.delete('/orders/{order_id}')
+@router.delete('/orders/{order_id}', deprecated=True)
 async def cancel_order(order_id: str, user=Depends(require_auth)):
     db = get_db()
     doc = await _get_order_or_404(db, order_id)
@@ -216,12 +243,15 @@ async def cancel_order(order_id: str, user=Depends(require_auth)):
         {'id': order_id},
         {'$set': {'status': 'cancelled', 'updated_at': _now()}}
     )
+    refreshed = await db.dewi_toko_orders.find_one({'id': order_id})
+    if refreshed:
+        await _mirror_order(db, refreshed)
     return {'message': 'Order dibatalkan'}
 
 
 # ── PACK BATCHES ──────────────────────────────────────────────────────────────
 
-@router.get('/pack-batches')
+@router.get('/pack-batches', deprecated=True)
 async def list_pack_batches(
     status: Optional[str] = None,
     limit: int = Query(default=50, ge=1, le=200),
@@ -235,7 +265,7 @@ async def list_pack_batches(
     return _clean_list(items)
 
 
-@router.post('/pack-batches', status_code=201)
+@router.post('/pack-batches', status_code=201, deprecated=True)
 async def create_pack_batch(payload: PackBatchIn, user=Depends(require_auth)):
     db = get_db()
     if payload.schedule_time not in SCHEDULE_TIMES:
@@ -269,10 +299,13 @@ async def create_pack_batch(payload: PackBatchIn, user=Depends(require_auth)):
             {'id': {'$in': valid_order_ids}},
             {'$set': {'status': 'packed', 'pack_batch_id': batch_doc['id'], 'packed_at': _now().isoformat(), 'updated_at': _now()}}
         )
+        # P1.D: mirror affected orders to marketing
+        async for refreshed in db.dewi_toko_orders.find({'id': {'$in': valid_order_ids}}):
+            await _mirror_order(db, refreshed)
     return {'message': f'Batch packing dibuat dengan {len(valid_order_ids)} order', 'id': batch_doc['id'], 'batch_code': code}
 
 
-@router.post('/pack-batches/{batch_id}/close')
+@router.post('/pack-batches/{batch_id}/close', deprecated=True)
 async def close_pack_batch(batch_id: str, user=Depends(require_auth)):
     db = get_db()
     doc = await db.dewi_toko_pack_batches.find_one({'id': batch_id})
