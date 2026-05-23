@@ -4,31 +4,19 @@
     "status": "completed"
   },
   {
-    "content": "Phase B.2: Cutover TokoCSReturnsModule -> /api/marketing/returns + /reviews + backfill",
+    "content": "Phase B.2: All 5 frontend modules cutover + backfills + photo/order endpoints",
     "status": "completed"
   },
   {
-    "content": "Phase B.2: Cutover TokoOrdersModule -> /api/marketing/orders + POST/DELETE endpoints",
+    "content": "Phase B.3: Run testing_agent_v3 comprehensive on all 5 modules (95% pass)",
     "status": "completed"
   },
   {
-    "content": "Phase B.2: Cutover TokoProductCatalogModule -> /api/marketing/catalogs/{toko_legacy}/items + photo endpoints + backfill",
+    "content": "Phase C: Delete deprecated endpoints across 3 files (preserved flashsales + pack-batches)",
     "status": "completed"
   },
   {
-    "content": "Phase B.2: Cutover TokoChannelManagerModule -> /api/marketing/accounts + sync + legacy-config",
-    "status": "completed"
-  },
-  {
-    "content": "Phase B.2: Cutover TokoDashboardModule -> /api/marketing/dashboard/toko-overview",
-    "status": "completed"
-  },
-  {
-    "content": "Phase B.3: Run testing_agent_v3 comprehensive on all 5 modules",
+    "content": "Phase C: Test regression after deletion (final pass)",
     "status": "in_progress"
-  },
-  {
-    "content": "Phase C: Delete 40 deprecated endpoints in dewi_toko.py / dewi_returns.py / dewi_online_orders.py",
-    "status": "pending"
   }
 ]

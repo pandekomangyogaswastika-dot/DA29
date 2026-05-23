@@ -549,8 +549,8 @@ async def upload_catalog_item_photo(
     data = await file.read()
     if len(data) > MAX_PHOTO_BYTES:
         raise HTTPException(413, 'Ukuran file > 5MB')
-    if len(data) < 100:
-        raise HTTPException(400, 'File terlalu kecil')
+    if len(data) < 50:
+        raise HTTPException(400, 'File terlalu kecil (min 50 bytes)')
 
     ext = 'jpg'
     if file.filename and '.' in file.filename:

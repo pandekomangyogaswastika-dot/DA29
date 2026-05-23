@@ -1,0 +1,101 @@
+{
+  "summary": "Phase C Toko Route Removal — Backend regression testing selesai dengan 100% success rate (46/46 core tests passed). Semua 26 deleted endpoints return 404 (bukan 500), semua 9 preserved endpoints (flashsales + pack-batches) berfungsi dengan baik, dan pack-batches integration dengan marketing_orders verified (orders marked as 'packed'). Semua marketing namespace endpoints functional.",
+  "backend_issues": {
+    "critical_bugs": [],
+    "minor_bugs": [
+      {
+        "endpoint": "POST /api/marketing/catalogs/{cat_id}/items",
+        "issue": "Returns HTTP 200 instead of 201 for successful creation (HTTP convention)",
+        "impact": "Very minor - item creation works correctly, just status code convention not followed",
+        "fix_priority": "LOW",
+        "file": "/app/backend/routes/marketing_catalog.py"
+      }
+    ],
+    "validation_notes": [
+      {
+        "endpoint": "POST /api/marketing/accounts/{code}/sync",
+        "note": "Returns 400 'Account belum di-enable' when account is disabled - this is EXPECTED validation behavior, not a bug"
+      },
+      {
+        "endpoint": "POST /api/marketing/returns",
+        "note": "Requires 'date' field in request body - proper validation working"
+      },
+      {
+        "endpoint": "POST /api/marketing/reviews",
+        "note": "Requires 'date' field in request body - proper validation working"
+      },
+      {
+        "endpoint": "GET /api/marketing/returns, GET /api/marketing/reviews",
+        "note": "Returns {success: true, data: [...], pagination: {...}} format (not plain array) - consistent API design"
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "passed_tests": [
+    "✅ Admin authentication (POST /api/auth/login)",
+    "✅ All 26 DELETED endpoints return 404 (not 500): /api/dewi/toko/products, /channels, /dashboard, /orders, /returns, /reviews, /channels/{code}/sync, /channels/{code}/sync-history, dll",
+    "✅ PRESERVED: GET /api/dewi/toko/flashsales - list flashsales",
+    "✅ PRESERVED: POST /api/dewi/toko/flashsales - create flashsale",
+    "✅ PRESERVED: GET /api/dewi/toko/flashsales/{id} - get flashsale detail",
+    "✅ PRESERVED: PUT /api/dewi/toko/flashsales/{id} - update flashsale",
+    "✅ PRESERVED: POST /api/dewi/toko/flashsales/{id}/activate - toggle flashsale status",
+    "✅ PRESERVED: DELETE /api/dewi/toko/flashsales/{id} - delete flashsale",
+    "✅ PRESERVED: GET /api/dewi/toko/pack-batches - list pack-batches",
+    "✅ PRESERVED: POST /api/dewi/toko/pack-batches - create pack-batch with order_ids",
+    "✅ PRESERVED: POST /api/dewi/toko/pack-batches/{id}/close - close pack-batch",
+    "✅ INTEGRATION: Pack-batch creation marks orders as 'packed' in marketing_orders collection (verified via GET /api/marketing/orders/{id})",
+    "✅ INTEGRATION: Pack-batch sets pack_batch_id and packed_date in marketing_orders",
+    "✅ Marketing: GET /api/marketing/dashboard/toko-overview - returns products/channels/top_products/recent_syncs",
+    "✅ Marketing: GET /api/marketing/orders/summary - returns total_orders/by_status/by_platform",
+    "✅ Marketing: GET /api/marketing/orders - list orders with pagination",
+    "✅ Marketing: POST /api/marketing/orders - create manual order",
+    "✅ Marketing: PATCH /api/marketing/orders/{id}/status - update order status",
+    "✅ Marketing: DELETE /api/marketing/orders/{id} - delete order",
+    "✅ Marketing: GET /api/marketing/accounts - list platform accounts",
+    "✅ Marketing: GET /api/marketing/accounts/{code}/sync-history - returns sync logs",
+    "✅ Marketing: PUT /api/marketing/accounts/{code}/legacy-config - update account config (credentials/fees)",
+    "✅ Marketing: GET /api/marketing/returns - list returns (with pagination)",
+    "✅ Marketing: GET /api/marketing/reviews - list reviews (with pagination)",
+    "✅ Marketing: GET /api/marketing/catalogs - list catalogs",
+    "✅ Marketing: GET /api/marketing/catalogs/{cat_id}/items - list catalog items",
+    "✅ Marketing: POST /api/marketing/catalogs/{cat_id}/items - create catalog item",
+    "✅ Marketing: GET /api/marketing/catalogs/{cat_id}/items/{item_id} - get catalog item",
+    "✅ Marketing: PUT /api/marketing/catalogs/{cat_id}/items/{item_id} - update catalog item",
+    "✅ Marketing: DELETE /api/marketing/catalogs/{cat_id}/items/{item_id} - delete catalog item",
+    "✅ Sanity: Backend server starts cleanly without import errors (verified from supervisor logs)",
+    "✅ Sanity: OpenAPI spec parseable (/openapi.json returns valid spec)",
+    "✅ Sanity: No deleted endpoints found in OpenAPI spec paths"
+  ],
+  "test_report_links": [
+    "/app/backend_test.py",
+    "/app/backend_test_marketing_extended.py"
+  ],
+  "success_percentage": {
+    "backend": "100% (46/46 core regression tests passed)",
+    "frontend": "N/A (backend-only testing per request)",
+    "integration": "100% (pack-batches → marketing_orders integration verified)"
+  },
+  "action_item_for_main_agent": "",
+  "updated_files": [
+    "/app/backend_test.py",
+    "/app/backend_test_marketing_extended.py"
+  ],
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_test_itself": false,
+  "notes": [
+    "Phase C cleanup berhasil: 31 endpoints dihapus, 9 endpoints preserved (6 flashsales + 3 pack-batches)",
+    "Semua deleted endpoints return 404 (correct routing) - tidak ada leftover dead code",
+    "Pack-batches integration verified: orders marked as 'packed' directly in marketing_orders collection (tidak via _OrdersView wrapper yang sudah dihapus)",
+    "Backend starts cleanly - no import errors after _OrdersView, _ScopedView, _legacy_channels, _legacy_syncs helpers deletion",
+    "_toko_adapter.py module masih ada (intentional) - digunakan oleh migration scripts di /app/backend/migrations/, tidak lagi diimport oleh route files",
+    "OpenAPI spec clean - no deleted endpoints in spec",
+    "Marketing namespace endpoints 100% functional - frontend dapat menggunakan semua endpoint tanpa masalah",
+    "MOCK sync provider berfungsi dengan validation (account must be enabled before sync) - real provider integration nanti",
+    "Returns/Reviews endpoints require 'date' field - proper validation working",
+    "Minor: Catalog item creation returns 200 instead of 201 (very low priority, functional works correctly)"
+  ]
+}
