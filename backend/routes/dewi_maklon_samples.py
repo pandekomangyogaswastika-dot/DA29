@@ -12,6 +12,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 from database import get_db
 from auth import require_auth
+from routes._maklon_adapter import find_maklon_record, po_to_legacy_order
 import uuid
 
 router = APIRouter(prefix='/api/dewi/maklon/samples', tags=['Dewi-Maklon-Samples'])
@@ -99,12 +100,15 @@ async def get_sample(sample_id: str, user: dict = Depends(require_auth)):
 
 @router.post('')
 async def create_sample(payload: SampleIn, user: dict = Depends(require_auth)):
-    """Create a new sample for a maklon order."""
+    """Create a new sample for a maklon order/PO."""
     db = get_db()
 
-    order = await db.dewi_maklon_orders.find_one({'id': payload.order_id})
-    if not order:
+    # P1.B: lookup in BOTH dewi_maklon_pos (SSOT) and dewi_maklon_orders (legacy)
+    rec = await find_maklon_record(db, payload.order_id)
+    if not rec:
         raise HTTPException(400, 'Order maklon tidak ditemukan')
+    is_po = rec.get('_collection') == 'dewi_maklon_pos'
+    order = po_to_legacy_order(rec) if is_po else rec
 
     now = datetime.now(timezone.utc)
     sample_code = payload.sample_code or await _generate_sample_code(db, order.get('order_code', 'UNK'))
@@ -117,6 +121,9 @@ async def create_sample(payload: SampleIn, user: dict = Depends(require_auth)):
     doc['id'] = str(uuid.uuid4())
     doc['sample_code'] = sample_code
     doc['order_code'] = order.get('order_code')
+    # P1.B: store BOTH order_id and po_id (for unified lookups)
+    if is_po:
+        doc['po_id'] = order.get('id')  # SSOT PO reference
     doc['client_id'] = order.get('client_id')
     doc['client_name'] = order.get('client_name')
     doc['status'] = 'draft'

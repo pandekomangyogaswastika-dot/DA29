@@ -14,6 +14,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone, timedelta, date
 from database import get_db
 from auth import JWT_SECRET, hash_password, verify_password, generate_password
+from routes._maklon_adapter import po_to_legacy_order
 import uuid
 import jwt as pyjwt
 import asyncio
@@ -244,12 +245,13 @@ async def client_dashboard(client: dict = Depends(require_client_auth)):
     db = get_db()
     cid = client.get('client_id')
 
-    total_orders = await db.dewi_maklon_orders.count_documents({'client_id': cid})
-    active_orders = await db.dewi_maklon_orders.count_documents({
+    # P1.B: SSOT is dewi_maklon_pos (legacy dewi_maklon_orders deprecated)
+    total_orders = await db.dewi_maklon_pos.count_documents({'client_id': cid})
+    active_orders = await db.dewi_maklon_pos.count_documents({
         'client_id': cid,
         'status': {'$nin': ['draft', 'completed', 'cancelled', 'invoiced']},
     })
-    completed_orders = await db.dewi_maklon_orders.count_documents({
+    completed_orders = await db.dewi_maklon_pos.count_documents({
         'client_id': cid, 'status': {'$in': ['completed', 'invoiced']},
     })
 
@@ -275,10 +277,11 @@ async def client_dashboard(client: dict = Depends(require_client_auth)):
         except ValueError:
             continue
 
-    # Recent orders (last 5)
-    recent_orders = await db.dewi_maklon_orders.find(
+    # Recent orders (last 5) — read from dewi_maklon_pos, project to legacy order shape
+    recent_pos = await db.dewi_maklon_pos.find(
         {'client_id': cid}
-    ).sort('order_date', -1).to_list(length=5)
+    ).sort('po_date', -1).to_list(length=5)
+    recent_orders = [po_to_legacy_order(_clean(p)) for p in recent_pos]
 
     # Pending action samples (full info, last 5)
     pending_sample_list = await db.dewi_maklon_samples.find({
@@ -300,7 +303,7 @@ async def client_dashboard(client: dict = Depends(require_client_auth)):
             'outstanding_amount': total_outstanding,
             'overdue_count': overdue_count,
         },
-        'recent_orders': [_clean(o) for o in recent_orders],
+        'recent_orders': recent_orders,
         'pending_samples': [_clean(s) for s in pending_sample_list],
     }
 
@@ -339,27 +342,40 @@ async def client_list_orders(
     client: dict = Depends(require_client_auth),
 ):
     db = get_db()
+    # P1.B: read from dewi_maklon_pos SSOT, project to legacy order shape
     query: Dict[str, Any] = {'client_id': client.get('client_id')}
     if status:
-        query['status'] = status
-    orders = await db.dewi_maklon_orders.find(query).sort('order_date', -1).to_list(length=500)
-    return [_clean(o) for o in orders]
+        # Caller may pass either legacy ('cutting','sewing','qc','packing','material_ready')
+        # or new PO status. Use LEGACY_TO_PO_STATUS to translate when caller uses legacy.
+        from routes._maklon_adapter import LEGACY_TO_PO_STATUS
+        po_status = LEGACY_TO_PO_STATUS.get(status, status)
+        query['status'] = po_status
+    pos = await db.dewi_maklon_pos.find(query).sort('po_date', -1).to_list(length=500)
+    orders = [po_to_legacy_order(_clean(p)) for p in pos]
+    # If caller asked for a specific legacy status, fine-filter the projected list
+    if status and status in ('cutting', 'sewing', 'qc', 'packing', 'material_ready'):
+        orders = [o for o in orders if o.get('status') == status]
+    return orders
 
 
 @router.get('/orders/{order_id}')
 async def client_get_order(order_id: str, client: dict = Depends(require_client_auth)):
     db = get_db()
-    order = await db.dewi_maklon_orders.find_one({
+    # P1.B: read from dewi_maklon_pos SSOT
+    po = await db.dewi_maklon_pos.find_one({
         'id': order_id, 'client_id': client.get('client_id'),
     })
-    if not order:
+    if not po:
         raise HTTPException(404, 'Order tidak ditemukan')
-    order = _clean(order)
+    order = po_to_legacy_order(_clean(po))
     # Counts of related objects
     order['samples_count'] = await db.dewi_maklon_samples.count_documents({
-        'order_id': order_id, 'client_id': client.get('client_id'),
+        '$or': [{'order_id': order_id}, {'po_id': order_id}],
+        'client_id': client.get('client_id'),
     })
-    order['qc_count'] = await db.dewi_maklon_qc_checks.count_documents({'order_id': order_id})
+    order['qc_count'] = await db.dewi_maklon_qc_checks.count_documents({
+        '$or': [{'order_id': order_id}, {'po_id': order_id}],
+    })
     order['timeline'] = _build_timeline(order)
     return order
 
@@ -367,13 +383,13 @@ async def client_get_order(order_id: str, client: dict = Depends(require_client_
 @router.get('/orders/{order_id}/qc')
 async def client_order_qc(order_id: str, client: dict = Depends(require_client_auth)):
     db = get_db()
-    order = await db.dewi_maklon_orders.find_one({
+    po = await db.dewi_maklon_pos.find_one({
         'id': order_id, 'client_id': client.get('client_id'),
     })
-    if not order:
+    if not po:
         raise HTTPException(404, 'Order tidak ditemukan')
     checks = await db.dewi_maklon_qc_checks.find(
-        {'order_id': order_id}
+        {'$or': [{'order_id': order_id}, {'po_id': order_id}]}
     ).sort('created_at', -1).to_list(length=500)
     return [_clean(c) for c in checks]
 
@@ -381,14 +397,15 @@ async def client_order_qc(order_id: str, client: dict = Depends(require_client_a
 @router.get('/orders/{order_id}/samples')
 async def client_order_samples(order_id: str, client: dict = Depends(require_client_auth)):
     db = get_db()
-    # Ownership check
-    order = await db.dewi_maklon_orders.find_one({
+    # Ownership check (read from SSOT)
+    po = await db.dewi_maklon_pos.find_one({
         'id': order_id, 'client_id': client.get('client_id'),
     })
-    if not order:
+    if not po:
         raise HTTPException(404, 'Order tidak ditemukan')
     samples = await db.dewi_maklon_samples.find(
-        {'order_id': order_id, 'client_id': client.get('client_id')}
+        {'$or': [{'order_id': order_id}, {'po_id': order_id}],
+         'client_id': client.get('client_id')}
     ).sort('created_at', -1).to_list(length=200)
     return [_clean(s) for s in samples]
 

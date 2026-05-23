@@ -1,42 +1,42 @@
 [
   {
-    "content": "Restore codebase: copy entire /tmp/DA28/ to /app/ (preserve .env)",
+    "content": "Phase 1 POC: poc_maklon_consolidation.py - PASS 6/6",
     "status": "completed"
   },
   {
-    "content": "Install backend (pip) + frontend (yarn) dependencies",
+    "content": "Phase 2a: Buat helper _maklon_adapter.py untuk konversi PO doc → legacy order shape",
     "status": "completed"
   },
   {
-    "content": "Restart services dan verifikasi sistem jalan (backend + frontend)",
+    "content": "Phase 2b: Refactor dewi_client_portal.py - dashboard counts, recent_orders, list/get orders pakai dewi_maklon_pos + adapter",
     "status": "completed"
   },
   {
-    "content": "Verifikasi database state + login dengan admin@garment.com",
+    "content": "Phase 2c: Refactor dewi_management_tools.py - count dari dewi_maklon_pos",
     "status": "completed"
   },
   {
-    "content": "Baca dokumen P1.A: FORENSIC_04_DATA_ARCHITECTURE.md, AccessoryModule.jsx, dewi_accessories_full.py",
+    "content": "Phase 2d: Refactor dewi_maklon_billing.py - lookup order_id juga dari dewi_maklon_pos (fallback)",
     "status": "completed"
   },
   {
-    "content": "Phase 1 POC: POC SSOT untuk core flow (items+stock+movements) PASS 100%",
+    "content": "Phase 2e: Refactor dewi_maklon_samples.py - dukung po_id selain order_id",
     "status": "completed"
   },
   {
-    "content": "Phase 2: dewi_accessories_full.py refactor lengkap untuk semua endpoint (items, stock, IR, loans, opname, PR, dashboard) - SSOT internal",
+    "content": "Phase 2f: Tandai 12 endpoint dewi_maklon.py /orders sebagai deprecated=True di OpenAPI",
     "status": "completed"
   },
   {
-    "content": "Phase 3: Migration script migrate_accessories.py - dry-run + execute PASS (2 items + 4 movements migrated, saldo 450/27 OK)",
+    "content": "Phase 3: Migration script migrate_maklon_orders.py - dry-run + execute PASS (3 legacy orders migrated)",
     "status": "completed"
   },
   {
-    "content": "Phase 4: Testing dengan testing_agent_v3 - PASS 29/29 backend tests",
-    "status": "completed"
+    "content": "Phase 4: Testing dengan testing_agent_v3 - end-to-end maklon flow",
+    "status": "in_progress"
   },
   {
-    "content": "Update PRD.md dan plan.md dengan progress P1.A",
-    "status": "completed"
+    "content": "Update PRD.md dan plan.md dengan progress P1.B",
+    "status": "pending"
   }
 ]

@@ -154,12 +154,12 @@ async def get_weekly_digest(
     total_invoiced = sum(float(i.get("total", 0)) for i in invoices)
     paid_invoices = sum(1 for i in invoices if i.get("status") == "paid")
 
-    # --- Maklon: Orders ---
-    maklon_orders = await db.dewi_maklon_orders.count_documents({
-        "order_date": {"$gte": since_str}
+    # --- Maklon: Orders (P1.B: SSOT dewi_maklon_pos) ---
+    maklon_orders = await db.dewi_maklon_pos.count_documents({
+        "po_date": {"$gte": since_str}
     })
-    maklon_completed = await db.dewi_maklon_orders.count_documents({
-        "stage": {"$in": ["completed", "invoiced"]},
+    maklon_completed = await db.dewi_maklon_pos.count_documents({
+        "status": {"$in": ["completed", "invoiced"]},
         "updated_at": {"$gte": since_str}
     })
 

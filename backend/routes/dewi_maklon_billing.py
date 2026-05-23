@@ -14,6 +14,7 @@ from datetime import datetime, timezone, timedelta, date
 from database import get_db
 from auth import require_auth
 from routes.dewi_system_config import get_config_value
+from routes._maklon_adapter import find_maklon_record, po_to_legacy_order
 import uuid
 
 router = APIRouter(prefix='/api/dewi/maklon', tags=['Dewi-Maklon-Billing'])
@@ -203,13 +204,20 @@ async def get_invoice_pdf(invoice_id: str, user: dict = Depends(require_auth)):
 
 @router.post('/invoices/generate')
 async def generate_invoice(payload: InvoiceGenerateIn, user: dict = Depends(require_auth)):
-    """Auto-generate invoice from a maklon order."""
+    """Auto-generate invoice from a maklon order/PO."""
     db = get_db()
-    order = await db.dewi_maklon_orders.find_one({'id': payload.order_id})
-    if not order:
+    # P1.B: lookup in dewi_maklon_pos FIRST (SSOT), fallback to dewi_maklon_orders
+    rec = await find_maklon_record(db, payload.order_id)
+    if not rec:
         raise HTTPException(404, 'Order tidak ditemukan')
-    if order.get('status') in ['draft', 'cancelled']:
-        raise HTTPException(400, f'Order dengan status {order.get("status")} tidak bisa diinvoice')
+    is_po = rec.get('_collection') == 'dewi_maklon_pos'
+    # Normalize to legacy order shape for the rest of the flow
+    order = po_to_legacy_order(rec) if is_po else rec
+    order_id_canonical = order.get('id')
+
+    legacy_status = order.get('status', 'draft')
+    if legacy_status in ['draft', 'cancelled']:
+        raise HTTPException(400, f'Order dengan status {legacy_status} tidak bisa diinvoice')
 
     # Check existing non-cancelled invoice for this order
     existing = await db.dewi_maklon_invoices.find_one({
@@ -270,11 +278,18 @@ async def generate_invoice(payload: InvoiceGenerateIn, user: dict = Depends(requ
     }
     await db.dewi_maklon_invoices.insert_one(doc)
 
-    # Mark order as invoiced
-    await db.dewi_maklon_orders.update_one(
-        {'id': order.get('id')},
-        {'$set': {'status': 'invoiced', 'updated_at': now}}
-    )
+    # Mark order as invoiced — write to whichever collection owns it
+    if is_po:
+        await db.dewi_maklon_pos.update_one(
+            {'id': order_id_canonical},
+            {'$set': {'status': 'invoiced', 'ar_invoice_id': doc['id'],
+                      'ar_invoice_number': invoice_number, 'updated_at': now}}
+        )
+    else:
+        await db.dewi_maklon_orders.update_one(
+            {'id': order_id_canonical},
+            {'$set': {'status': 'invoiced', 'updated_at': now}}
+        )
 
     await _recalc_invoice(db, doc['id'])
 
@@ -329,9 +344,13 @@ async def cancel_invoice(invoice_id: str, user: dict = Depends(require_auth)):
         {'id': invoice_id},
         {'$set': {'status': 'cancelled', 'updated_at': datetime.now(timezone.utc)}}
     )
-    # Revert order status (best-effort) to completed
+    # Revert order status (best-effort) to completed — try BOTH collections
     order_id = inv.get('order_id')
     if order_id:
+        await db.dewi_maklon_pos.update_one(
+            {'id': order_id, 'status': 'invoiced'},
+            {'$set': {'status': 'completed', 'updated_at': datetime.now(timezone.utc)}}
+        )
         await db.dewi_maklon_orders.update_one(
             {'id': order_id, 'status': 'invoiced'},
             {'$set': {'status': 'completed', 'updated_at': datetime.now(timezone.utc)}}
@@ -421,9 +440,14 @@ async def get_hpp(order_id: str, user: dict = Depends(require_auth)):
 async def upsert_hpp(payload: HPPIn, user: dict = Depends(require_auth)):
     """Create or update HPP for an order."""
     db = get_db()
-    order = await db.dewi_maklon_orders.find_one({'id': payload.order_id})
-    if not order:
+    # P1.B: SSOT is dewi_maklon_pos, fallback to legacy
+    rec = await find_maklon_record(db, payload.order_id)
+    if not rec:
         raise HTTPException(404, 'Order tidak ditemukan')
+
+    # Normalize record shape (PO or legacy) to legacy-order view
+    is_po = rec.get('_collection') == 'dewi_maklon_pos'
+    order = po_to_legacy_order(rec) if is_po else rec
 
     overhead_default = float(await get_config_value(db, 'hpp_overhead_pct', 15.0) or 0)
     profit_default = float(await get_config_value(db, 'hpp_profit_margin_pct', 20.0) or 0)

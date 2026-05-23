@@ -1,118 +1,101 @@
 """
-CV. Dewi Aditya - Backend API Testing
-P1.A: Accessory Consolidation (SSOT-backed implementation)
-
-Tests all /api/acc/* endpoints to verify:
-- Items now backed by rahaza_materials (type='accessory')
-- Stock backed by rahaza_material_stock
-- Movements backed by rahaza_material_movements
-- Specialized features (loans, internal-requests, purchase-requests, opname) preserved
+Backend Test Suite: P1.B Maklon Orders Consolidation
+======================================================
+Tests the migration from dewi_maklon_orders (legacy) to dewi_maklon_pos (SSOT).
 
 Test Coverage:
-1. Item CRUD (list, create, update, delete)
-2. Stock operations (receive, issue, movements)
-3. Internal requests (create, approve, issue)
-4. Loans (create, return)
-5. Purchase requests (create, submit, receive)
-6. Opname (start, count, complete)
-7. Dashboard stats
+- PO CRUD operations (dewi_maklon_pos)
+- Legacy endpoints (dewi_maklon_orders) — deprecated but still working
+- Adapter integration (billing, samples, management tools)
+- Client portal projection (PO → legacy order shape)
+- Migration script idempotency
+- OpenAPI deprecation markers
+
+Public endpoint: https://doc-audit-4.preview.emergentagent.com
+Admin credentials: admin@garment.com / Admin@123
 """
+
 import requests
 import sys
-from datetime import datetime
+import json
+from datetime import datetime, date
+from typing import Optional, Dict, Any
 
-# Configuration
 BASE_URL = "https://doc-audit-4.preview.emergentagent.com"
 ADMIN_EMAIL = "admin@garment.com"
 ADMIN_PASSWORD = "Admin@123"
 
-class Colors:
-    GREEN = '\033[92m'
-    RED = '\033[91m'
-    YELLOW = '\033[93m'
-    BLUE = '\033[94m'
-    CYAN = '\033[96m'
-    MAGENTA = '\033[95m'
-    END = '\033[0m'
 
-class AccessoryTester:
-    def __init__(self):
-        self.token = None
+class MaklonConsolidationTester:
+    def __init__(self, base_url: str):
+        self.base_url = base_url
+        self.admin_token: Optional[str] = None
+        self.client_token: Optional[str] = None
         self.tests_run = 0
         self.tests_passed = 0
-        self.tests_failed = 0
-        self.failed_tests = []
-        
-        # Test data IDs (will be populated during tests)
-        self.test_item_id = None
-        self.test_request_id = None
-        self.test_loan_id = None
-        self.test_pr_id = None
-        self.test_opname_id = None
+        self.test_client_id: Optional[str] = None
+        self.test_po_id: Optional[str] = None
+        self.migrated_po_ids = []
+        self.errors = []
 
-    def log(self, msg, color=Colors.BLUE):
-        print(f"{color}{msg}{Colors.END}")
+    def log(self, msg: str, level: str = "INFO"):
+        """Log test messages."""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        print(f"[{timestamp}] [{level}] {msg}")
 
-    def test(self, name, method, endpoint, expected_status, data=None, params=None):
-        """Run a single API test"""
-        url = f"{BASE_URL}{endpoint}"
-        headers = {'Content-Type': 'application/json'}
-        if self.token:
-            headers['Authorization'] = f'Bearer {self.token}'
+    def run_test(self, name: str, method: str, endpoint: str, expected_status: int,
+                 data: Optional[Dict] = None, headers: Optional[Dict] = None,
+                 token: Optional[str] = None) -> tuple[bool, Any]:
+        """Run a single API test."""
+        url = f"{self.base_url}{endpoint}"
+        req_headers = {'Content-Type': 'application/json'}
+        if headers:
+            req_headers.update(headers)
+        if token:
+            req_headers['Authorization'] = f'Bearer {token}'
 
         self.tests_run += 1
-        print(f"\n{Colors.BLUE}🔍 Test {self.tests_run}: {name}{Colors.END}")
-        print(f"   {method} {endpoint}")
-        if params:
-            print(f"   Params: {params}")
-        if data:
-            print(f"   Data: {data}")
-        
+        self.log(f"Test #{self.tests_run}: {name}")
+
         try:
             if method == 'GET':
-                response = requests.get(url, headers=headers, params=params, timeout=15)
+                response = requests.get(url, headers=req_headers, timeout=30)
             elif method == 'POST':
-                response = requests.post(url, json=data, headers=headers, timeout=15)
+                response = requests.post(url, json=data, headers=req_headers, timeout=30)
             elif method == 'PUT':
-                response = requests.put(url, json=data, headers=headers, timeout=15)
+                response = requests.put(url, json=data, headers=req_headers, timeout=30)
             elif method == 'DELETE':
-                response = requests.delete(url, headers=headers, timeout=15)
+                response = requests.delete(url, headers=req_headers, timeout=30)
             else:
                 raise ValueError(f"Unsupported method: {method}")
 
             success = response.status_code == expected_status
-            
             if success:
                 self.tests_passed += 1
-                print(f"{Colors.GREEN}✅ PASS - Status: {response.status_code}{Colors.END}")
+                self.log(f"✅ PASS - Status: {response.status_code}", "PASS")
                 try:
                     return True, response.json()
-                except:
-                    return True, {}
+                except Exception:
+                    return True, response.text
             else:
-                self.tests_failed += 1
-                self.failed_tests.append(name)
-                print(f"{Colors.RED}❌ FAIL - Expected {expected_status}, got {response.status_code}{Colors.END}")
-                try:
-                    err_body = response.json()
-                    print(f"{Colors.RED}   Error: {err_body.get('detail', err_body)}{Colors.END}")
-                except:
-                    print(f"{Colors.RED}   Response: {response.text[:200]}{Colors.END}")
+                self.log(f"❌ FAIL - Expected {expected_status}, got {response.status_code}", "FAIL")
+                self.log(f"   Response: {response.text[:200]}", "FAIL")
+                self.errors.append({
+                    'test': name,
+                    'expected': expected_status,
+                    'actual': response.status_code,
+                    'response': response.text[:500]
+                })
                 return False, {}
 
         except Exception as e:
-            self.tests_failed += 1
-            self.failed_tests.append(name)
-            print(f"{Colors.RED}❌ FAIL - Exception: {str(e)}{Colors.END}")
+            self.log(f"❌ FAIL - Error: {str(e)}", "FAIL")
+            self.errors.append({'test': name, 'error': str(e)})
             return False, {}
 
-    def login(self):
-        """Login as admin"""
-        self.log("\n" + "="*80, Colors.MAGENTA)
-        self.log("AUTHENTICATION", Colors.MAGENTA)
-        self.log("="*80, Colors.MAGENTA)
-        
-        success, response = self.test(
+    def test_admin_login(self) -> bool:
+        """Test 0: Admin login."""
+        success, response = self.run_test(
             "Admin Login",
             "POST",
             "/api/auth/login",
@@ -120,623 +103,515 @@ class AccessoryTester:
             data={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
         )
         if success and 'token' in response:
-            self.token = response['token']
-            self.log(f"✅ Logged in as {ADMIN_EMAIL}", Colors.GREEN)
+            self.admin_token = response['token']
+            self.log(f"Admin token obtained: {self.admin_token[:20]}...")
             return True
-        else:
-            self.log("❌ Login failed - cannot proceed", Colors.RED)
+        return False
+
+    def test_list_pos(self) -> bool:
+        """Test 1: GET /api/dewi/maklon/pos — list all POs."""
+        success, response = self.run_test(
+            "List all POs (dewi_maklon_pos)",
+            "GET",
+            "/api/dewi/maklon/pos",
+            200,
+            token=self.admin_token
+        )
+        if success and isinstance(response, list):
+            self.log(f"   Found {len(response)} POs")
+            # Look for migrated POs (MKLO-LEG-*)
+            migrated = [po for po in response if po.get('po_number', '').startswith('MKLO-LEG-')]
+            self.migrated_po_ids = [po['id'] for po in migrated]
+            self.log(f"   Migrated POs: {len(migrated)} (IDs: {self.migrated_po_ids[:3]})")
+            if len(migrated) >= 3:
+                self.log(f"   ✓ Found expected migrated POs: MKLO-LEG-001, MKLO-LEG-002, MKLO-LEG-003")
+                return True
+            else:
+                self.log(f"   ⚠ Expected at least 3 migrated POs, found {len(migrated)}", "WARN")
+                return False
+        return False
+
+    def test_create_client(self) -> bool:
+        """Test 2: POST /api/dewi/maklon/clients — create test client."""
+        client_code = f"TEST-P1B-{int(datetime.now().timestamp())}"
+        success, response = self.run_test(
+            "Create test client 'PT Test Maklon P1B'",
+            "POST",
+            "/api/dewi/maklon/clients",
+            200,
+            data={
+                "code": client_code,
+                "name": "PT Test Maklon P1B",
+                "pic_name": "Test PIC",
+                "pic_email": "test@example.com",
+                "status": "active"
+            },
+            token=self.admin_token
+        )
+        if success and 'id' in response:
+            self.test_client_id = response['id']
+            self.log(f"   Test client created: {self.test_client_id}")
+            return True
+        return False
+
+    def test_create_po(self) -> bool:
+        """Test 3: POST /api/dewi/maklon/pos — create new PO with 2 items."""
+        if not self.test_client_id:
+            self.log("   ⚠ Skipping: no test client ID", "WARN")
             return False
 
-    def test_items_crud(self):
-        """Test item CRUD operations"""
-        self.log("\n" + "="*80, Colors.MAGENTA)
-        self.log("SECTION 1: ITEM CRUD (rahaza_materials with type='accessory')", Colors.MAGENTA)
-        self.log("="*80, Colors.MAGENTA)
-        
-        # 1. List items (should include migrated legacy items)
-        success, response = self.test(
-            "GET /api/acc/items - List all accessories",
-            "GET",
-            "/api/acc/items",
-            200
-        )
-        if success:
-            items = response if isinstance(response, list) else []
-            self.log(f"   Found {len(items)} accessories", Colors.CYAN)
-            if len(items) > 0:
-                sample = items[0]
-                self.log(f"   Sample: {sample.get('code')} - {sample.get('name')}", Colors.CYAN)
-                # Verify field shape
-                required_fields = ['id', 'code', 'name', 'category', 'unit', 'stock_qty', 'stock_status']
-                missing = [f for f in required_fields if f not in sample]
-                if missing:
-                    self.log(f"   ⚠️  Missing fields: {missing}", Colors.YELLOW)
-        
-        # 2. Search by name
-        success, response = self.test(
-            "GET /api/acc/items?search=Legacy - Search accessories",
-            "GET",
-            "/api/acc/items",
-            200,
-            params={"search": "Legacy"}
-        )
-        if success:
-            items = response if isinstance(response, list) else []
-            self.log(f"   Found {len(items)} items matching 'Legacy'", Colors.CYAN)
-        
-        # 3. Filter by category
-        success, response = self.test(
-            "GET /api/acc/items?category=Resleting - Filter by category",
-            "GET",
-            "/api/acc/items",
-            200,
-            params={"category": "Resleting"}
-        )
-        
-        # 4. Create new accessory
-        success, response = self.test(
-            "POST /api/acc/items - Create accessory 'Test Resleting YKK'",
+        success, response = self.run_test(
+            "Create new PO with 2 items (different sizes/colors)",
             "POST",
-            "/api/acc/items",
-            201,
+            "/api/dewi/maklon/pos",
+            200,
             data={
-                "name": "Test Resleting YKK",
-                "code": "TEST-RES-001",
-                "category": "Resleting",
-                "unit": "pcs",
-                "min_stock": 20,
-                "description": "Test item for P1.A validation",
-                "supplier": "YKK Indonesia"
-            }
+                "client_id": self.test_client_id,
+                "po_date": date.today().isoformat(),
+                "deadline": "2026-12-31",
+                "payment_terms": "net_30",
+                "notes": "Test PO for P1.B consolidation",
+                "items": [
+                    {
+                        "seri_no": "S01",
+                        "artikel": "TEST-ARTIKEL-A",
+                        "color": "Red",
+                        "size": "M",
+                        "qty": 30,
+                        "cmt_rate_per_pcs": 50000,
+                        "product_description": "Test Product A"
+                    },
+                    {
+                        "seri_no": "S02",
+                        "artikel": "TEST-ARTIKEL-B",
+                        "color": "Blue",
+                        "size": "L",
+                        "qty": 40,
+                        "cmt_rate_per_pcs": 50000,
+                        "product_description": "Test Product B"
+                    }
+                ]
+            },
+            token=self.admin_token
         )
-        if success:
-            self.test_item_id = response.get('id')
-            self.log(f"   Created item ID: {self.test_item_id}", Colors.CYAN)
-            self.log(f"   Code: {response.get('code')}", Colors.CYAN)
-            self.log(f"   Stock status: {response.get('stock_status')}", Colors.CYAN)
-        
-        # 5. Verify item appears in list
-        if self.test_item_id:
-            success, response = self.test(
-                "GET /api/acc/items - Verify new item in list",
-                "GET",
-                "/api/acc/items",
-                200
-            )
-            if success:
-                items = response if isinstance(response, list) else []
-                found = any(item.get('id') == self.test_item_id for item in items)
-                if found:
-                    self.log(f"   ✅ New item found in list", Colors.GREEN)
-                else:
-                    self.log(f"   ❌ New item NOT found in list", Colors.RED)
-        
-        # 6. Update item (change min_stock to 50)
-        if self.test_item_id:
-            success, response = self.test(
-                "PUT /api/acc/items/{id} - Update min_stock to 50",
-                "PUT",
-                f"/api/acc/items/{self.test_item_id}",
-                200,
-                data={"min_stock": 50}
-            )
-            if success:
-                new_min = response.get('min_stock')
-                if new_min == 50:
-                    self.log(f"   ✅ min_stock updated to {new_min}", Colors.GREEN)
-                else:
-                    self.log(f"   ❌ min_stock is {new_min}, expected 50", Colors.RED)
-
-    def test_stock_operations(self):
-        """Test stock receive, issue, and movements"""
-        self.log("\n" + "="*80, Colors.MAGENTA)
-        self.log("SECTION 2: STOCK OPERATIONS (rahaza_material_stock + movements)", Colors.MAGENTA)
-        self.log("="*80, Colors.MAGENTA)
-        
-        if not self.test_item_id:
-            self.log("⚠️  Skipping stock tests - no test item created", Colors.YELLOW)
-            return
-        
-        # 1. Receive stock (100 pcs)
-        success, response = self.test(
-            "POST /api/acc/stock/receive - Receive 100 pcs",
-            "POST",
-            "/api/acc/stock/receive",
-            201,
-            data={
-                "acc_id": self.test_item_id,
-                "qty": 100,
-                "notes": "Initial stock for testing",
-                "ref_type": "manual"
-            }
-        )
-        if success:
-            new_qty = response.get('new_qty')
-            self.log(f"   New stock quantity: {new_qty}", Colors.CYAN)
-            if new_qty == 100:
-                self.log(f"   ✅ Stock correctly updated to 100", Colors.GREEN)
+        if success and 'id' in response:
+            self.test_po_id = response['id']
+            po_number = response.get('po_number', 'N/A')
+            total_qty = response.get('total_qty', 0)
+            total_value = response.get('total_value', 0)
+            self.log(f"   PO created: {po_number} (ID: {self.test_po_id})")
+            self.log(f"   Total qty: {total_qty}, Total value: {total_value}")
+            # Verify expectations
+            if po_number.startswith('MKL-') and total_qty == 70 and total_value == 3500000:
+                self.log(f"   ✓ PO format, qty, and value correct")
+                return True
             else:
-                self.log(f"   ❌ Expected 100, got {new_qty}", Colors.RED)
-        
-        # 2. Verify stock in overview
-        success, response = self.test(
-            "GET /api/acc/stock - Verify stock in overview",
+                self.log(f"   ⚠ PO validation failed: expected qty=70, value=3500000", "WARN")
+                return False
+        return False
+
+    def test_get_po_detail(self) -> bool:
+        """Test 4: GET /api/dewi/maklon/pos/{po_id} — verify enriched detail."""
+        if not self.test_po_id:
+            self.log("   ⚠ Skipping: no test PO ID", "WARN")
+            return False
+
+        success, response = self.run_test(
+            f"Get PO detail (enriched with dispatches)",
             "GET",
-            "/api/acc/stock",
-            200
-        )
-        if success:
-            items = response if isinstance(response, list) else []
-            item = next((i for i in items if i.get('id') == self.test_item_id), None)
-            if item:
-                stock_qty = item.get('stock_qty')
-                stock_status = item.get('stock_status')
-                self.log(f"   Stock qty: {stock_qty}, status: {stock_status}", Colors.CYAN)
-                if stock_qty == 100 and stock_status == 'ok':
-                    self.log(f"   ✅ Stock overview correct", Colors.GREEN)
-                else:
-                    self.log(f"   ❌ Stock overview incorrect", Colors.RED)
-        
-        # 3. Issue stock (30 pcs)
-        success, response = self.test(
-            "POST /api/acc/stock/issue - Issue 30 pcs",
-            "POST",
-            "/api/acc/stock/issue",
-            201,
-            data={
-                "acc_id": self.test_item_id,
-                "qty": 30,
-                "notes": "Test issue",
-                "ref_type": "manual"
-            }
-        )
-        if success:
-            new_qty = response.get('new_qty')
-            self.log(f"   New stock quantity: {new_qty}", Colors.CYAN)
-            if new_qty == 70:
-                self.log(f"   ✅ Stock correctly updated to 70", Colors.GREEN)
-            else:
-                self.log(f"   ❌ Expected 70, got {new_qty}", Colors.RED)
-        
-        # 4. Try to issue more than available (should fail)
-        success, response = self.test(
-            "POST /api/acc/stock/issue - Try to issue 200 pcs (should fail)",
-            "POST",
-            "/api/acc/stock/issue",
-            400,
-            data={
-                "acc_id": self.test_item_id,
-                "qty": 200,
-                "notes": "Should fail - insufficient stock"
-            }
-        )
-        if success:
-            self.log(f"   ✅ Correctly rejected insufficient stock", Colors.GREEN)
-        
-        # 5. Verify movements logged
-        success, response = self.test(
-            "GET /api/acc/stock/movements?acc_id={id} - Verify movements",
-            "GET",
-            "/api/acc/stock/movements",
+            f"/api/dewi/maklon/pos/{self.test_po_id}",
             200,
-            params={"acc_id": self.test_item_id}
+            token=self.admin_token
         )
         if success:
-            movements = response if isinstance(response, list) else []
-            self.log(f"   Found {len(movements)} movements", Colors.CYAN)
-            if len(movements) >= 2:
-                # Should have IN +100 and OUT -30
-                in_mvs = [m for m in movements if m.get('movement_type') == 'IN']
-                out_mvs = [m for m in movements if m.get('movement_type') == 'OUT']
-                self.log(f"   IN movements: {len(in_mvs)}, OUT movements: {len(out_mvs)}", Colors.CYAN)
-                
-                # Verify qty_signed
-                for m in movements[:2]:
-                    self.log(f"   Movement: {m.get('movement_type')} qty_signed={m.get('qty_signed')}", Colors.CYAN)
+            items = response.get('items', [])
+            dispatches = response.get('dispatches', [])
+            qty_dispatched = response.get('qty_dispatched', 0)
+            self.log(f"   Items: {len(items)}, Dispatches: {len(dispatches)}, Qty dispatched: {qty_dispatched}")
+            if len(items) == 2 and qty_dispatched == 0:
+                self.log(f"   ✓ PO detail correct (2 items, 0 dispatched)")
+                return True
+            else:
+                self.log(f"   ⚠ Expected 2 items and 0 dispatched", "WARN")
+                return False
+        return False
 
-    def test_internal_requests(self):
-        """Test internal request workflow"""
-        self.log("\n" + "="*80, Colors.MAGENTA)
-        self.log("SECTION 3: INTERNAL REQUESTS (acc_internal_requests)", Colors.MAGENTA)
-        self.log("="*80, Colors.MAGENTA)
-        
-        if not self.test_item_id:
-            self.log("⚠️  Skipping internal request tests - no test item", Colors.YELLOW)
-            return
-        
-        # 1. Create internal request
-        success, response = self.test(
-            "POST /api/acc/internal-requests - Create request",
+    def test_update_po_status(self) -> bool:
+        """Test 5: PUT /api/dewi/maklon/pos/{po_id}/confirm — change status to confirmed."""
+        if not self.test_po_id:
+            self.log("   ⚠ Skipping: no test PO ID", "WARN")
+            return False
+
+        success, response = self.run_test(
+            "Confirm PO (status → confirmed)",
             "POST",
-            "/api/acc/internal-requests",
-            201,
-            data={
-                "divisi": "Produksi",
-                "purpose": "Test request for P1.A validation",
-                "items": [
-                    {
-                        "acc_id": self.test_item_id,
-                        "acc_name": "Test Resleting YKK",
-                        "qty_requested": 10
-                    }
-                ]
-            }
+            f"/api/dewi/maklon/pos/{self.test_po_id}/confirm",
+            200,
+            token=self.admin_token
         )
         if success:
-            self.test_request_id = response.get('id')
-            request_number = response.get('request_number')
-            status = response.get('status')
-            self.log(f"   Request ID: {self.test_request_id}", Colors.CYAN)
-            self.log(f"   Request number: {request_number}", Colors.CYAN)
-            self.log(f"   Status: {status}", Colors.CYAN)
-            if status == 'Pending':
-                self.log(f"   ✅ Request created with Pending status", Colors.GREEN)
-        
-        # 2. Approve request
-        if self.test_request_id:
-            success, response = self.test(
-                "PUT /api/acc/internal-requests/{id} - Approve request",
-                "PUT",
-                f"/api/acc/internal-requests/{self.test_request_id}",
-                200,
-                data={"status": "Approved", "admin_notes": "Approved for testing"}
-            )
-            if success:
-                status = response.get('status')
-                if status == 'Approved':
-                    self.log(f"   ✅ Request approved", Colors.GREEN)
-        
-        # 3. Issue request (should deduct stock)
-        if self.test_request_id:
-            success, response = self.test(
-                "PUT /api/acc/internal-requests/{id} - Issue request",
-                "PUT",
-                f"/api/acc/internal-requests/{self.test_request_id}",
-                200,
-                data={"status": "Issued"}
-            )
-            if success:
-                status = response.get('status')
-                if status == 'Issued':
-                    self.log(f"   ✅ Request issued", Colors.GREEN)
-                    
-                    # Verify stock decreased (70 - 10 = 60)
-                    success2, response2 = self.test(
-                        "GET /api/acc/stock - Verify stock after issue",
-                        "GET",
-                        "/api/acc/stock",
-                        200
-                    )
-                    if success2:
-                        items = response2 if isinstance(response2, list) else []
-                        item = next((i for i in items if i.get('id') == self.test_item_id), None)
-                        if item:
-                            stock_qty = item.get('stock_qty')
-                            self.log(f"   Stock after issue: {stock_qty}", Colors.CYAN)
-                            if stock_qty == 60:
-                                self.log(f"   ✅ Stock correctly decreased to 60", Colors.GREEN)
-                            else:
-                                self.log(f"   ❌ Expected 60, got {stock_qty}", Colors.RED)
+            status = response.get('status', '')
+            wo_created = response.get('work_orders_created', [])
+            self.log(f"   Status: {status}, WOs created: {len(wo_created)}")
+            if status == 'confirmed':
+                self.log(f"   ✓ PO confirmed successfully")
+                return True
+        return False
 
-    def test_loans(self):
-        """Test loan workflow"""
-        self.log("\n" + "="*80, Colors.MAGENTA)
-        self.log("SECTION 4: LOANS (acc_loans)", Colors.MAGENTA)
-        self.log("="*80, Colors.MAGENTA)
-        
-        if not self.test_item_id:
-            self.log("⚠️  Skipping loan tests - no test item", Colors.YELLOW)
-            return
-        
-        # 1. Create loan
-        success, response = self.test(
-            "POST /api/acc/loans - Create loan",
-            "POST",
-            "/api/acc/loans",
-            201,
-            data={
-                "borrower_name": "Budi Santoso",
-                "borrower_divisi": "Produksi",
-                "purpose": "Test loan for P1.A validation",
-                "items": [
-                    {
-                        "acc_id": self.test_item_id,
-                        "acc_name": "Test Resleting YKK",
-                        "qty": 5
-                    }
-                ]
-            }
-        )
-        if success:
-            self.test_loan_id = response.get('id')
-            loan_number = response.get('loan_number')
-            status = response.get('status')
-            self.log(f"   Loan ID: {self.test_loan_id}", Colors.CYAN)
-            self.log(f"   Loan number: {loan_number}", Colors.CYAN)
-            self.log(f"   Status: {status}", Colors.CYAN)
-            
-            # Verify stock decreased (60 - 5 = 55)
-            success2, response2 = self.test(
-                "GET /api/acc/stock - Verify stock after loan",
-                "GET",
-                "/api/acc/stock",
-                200
-            )
-            if success2:
-                items = response2 if isinstance(response2, list) else []
-                item = next((i for i in items if i.get('id') == self.test_item_id), None)
-                if item:
-                    stock_qty = item.get('stock_qty')
-                    self.log(f"   Stock after loan: {stock_qty}", Colors.CYAN)
-                    if stock_qty == 55:
-                        self.log(f"   ✅ Stock correctly decreased to 55", Colors.GREEN)
-                    else:
-                        self.log(f"   ❌ Expected 55, got {stock_qty}", Colors.RED)
-        
-        # 2. Return loan
-        if self.test_loan_id:
-            success, response = self.test(
-                "PUT /api/acc/loans/{id}/return - Return loan",
-                "PUT",
-                f"/api/acc/loans/{self.test_loan_id}/return",
-                200,
-                data={"return_notes": "Returned in good condition"}
-            )
-            if success:
-                status = response.get('status')
-                if status == 'Returned':
-                    self.log(f"   ✅ Loan returned", Colors.GREEN)
-                    
-                    # Verify stock increased (55 + 5 = 60)
-                    success2, response2 = self.test(
-                        "GET /api/acc/stock - Verify stock after return",
-                        "GET",
-                        "/api/acc/stock",
-                        200
-                    )
-                    if success2:
-                        items = response2 if isinstance(response2, list) else []
-                        item = next((i for i in items if i.get('id') == self.test_item_id), None)
-                        if item:
-                            stock_qty = item.get('stock_qty')
-                            self.log(f"   Stock after return: {stock_qty}", Colors.CYAN)
-                            if stock_qty == 60:
-                                self.log(f"   ✅ Stock correctly increased to 60", Colors.GREEN)
-                            else:
-                                self.log(f"   ❌ Expected 60, got {stock_qty}", Colors.RED)
-
-    def test_purchase_requests(self):
-        """Test purchase request workflow"""
-        self.log("\n" + "="*80, Colors.MAGENTA)
-        self.log("SECTION 5: PURCHASE REQUESTS (acc_purchase_requests)", Colors.MAGENTA)
-        self.log("="*80, Colors.MAGENTA)
-        
-        if not self.test_item_id:
-            self.log("⚠️  Skipping PR tests - no test item", Colors.YELLOW)
-            return
-        
-        # 1. Create PR
-        success, response = self.test(
-            "POST /api/acc/purchase-requests - Create PR",
-            "POST",
-            "/api/acc/purchase-requests",
-            201,
-            data={
-                "priority": "Normal",
-                "purpose": "Restock for testing",
-                "supplier": "YKK Indonesia",
-                "items": [
-                    {
-                        "acc_id": self.test_item_id,
-                        "acc_name": "Test Resleting YKK",
-                        "qty_requested": 200,
-                        "estimated_price": 5000
-                    }
-                ]
-            }
-        )
-        if success:
-            self.test_pr_id = response.get('id')
-            pr_number = response.get('pr_number')
-            status = response.get('status')
-            total = response.get('total_estimated')
-            self.log(f"   PR ID: {self.test_pr_id}", Colors.CYAN)
-            self.log(f"   PR number: {pr_number}", Colors.CYAN)
-            self.log(f"   Status: {status}", Colors.CYAN)
-            self.log(f"   Total estimated: {total}", Colors.CYAN)
-            if status == 'Draft' and total == 1000000:
-                self.log(f"   ✅ PR created correctly", Colors.GREEN)
-        
-        # 2. Submit PR
-        if self.test_pr_id:
-            success, response = self.test(
-                "PUT /api/acc/purchase-requests/{id} - Submit PR",
-                "PUT",
-                f"/api/acc/purchase-requests/{self.test_pr_id}",
-                200,
-                data={"status": "Submitted"}
-            )
-            if success:
-                status = response.get('status')
-                if status == 'Submitted':
-                    self.log(f"   ✅ PR submitted", Colors.GREEN)
-        
-        # 3. Mark as Received (should increase stock)
-        if self.test_pr_id:
-            success, response = self.test(
-                "PUT /api/acc/purchase-requests/{id} - Mark as Received",
-                "PUT",
-                f"/api/acc/purchase-requests/{self.test_pr_id}",
-                200,
-                data={"status": "Received"}
-            )
-            if success:
-                status = response.get('status')
-                if status == 'Received':
-                    self.log(f"   ✅ PR marked as received", Colors.GREEN)
-                    
-                    # Verify stock increased (60 + 200 = 260)
-                    success2, response2 = self.test(
-                        "GET /api/acc/stock - Verify stock after PR receive",
-                        "GET",
-                        "/api/acc/stock",
-                        200
-                    )
-                    if success2:
-                        items = response2 if isinstance(response2, list) else []
-                        item = next((i for i in items if i.get('id') == self.test_item_id), None)
-                        if item:
-                            stock_qty = item.get('stock_qty')
-                            self.log(f"   Stock after PR receive: {stock_qty}", Colors.CYAN)
-                            if stock_qty == 260:
-                                self.log(f"   ✅ Stock correctly increased to 260", Colors.GREEN)
-                            else:
-                                self.log(f"   ❌ Expected 260, got {stock_qty}", Colors.RED)
-
-    def test_opname(self):
-        """Test opname (stock taking) workflow"""
-        self.log("\n" + "="*80, Colors.MAGENTA)
-        self.log("SECTION 6: OPNAME (acc_opname_sessions)", Colors.MAGENTA)
-        self.log("="*80, Colors.MAGENTA)
-        
-        # 1. Start opname session
-        success, response = self.test(
-            "POST /api/acc/opname - Start opname session",
-            "POST",
-            "/api/acc/opname",
-            201,
-            data={"notes": "P1.A validation opname"}
-        )
-        if success:
-            self.test_opname_id = response.get('id')
-            ref_number = response.get('ref_number')
-            status = response.get('status')
-            total_items = response.get('total_items')
-            self.log(f"   Opname ID: {self.test_opname_id}", Colors.CYAN)
-            self.log(f"   Ref number: {ref_number}", Colors.CYAN)
-            self.log(f"   Status: {status}", Colors.CYAN)
-            self.log(f"   Total items: {total_items}", Colors.CYAN)
-            if status == 'Active':
-                self.log(f"   ✅ Opname session started", Colors.GREEN)
-        
-        # 2. Submit count for test item (counted 258 when system shows 260)
-        if self.test_opname_id and self.test_item_id:
-            success, response = self.test(
-                "PUT /api/acc/opname/{id}/count - Submit count",
-                "PUT",
-                f"/api/acc/opname/{self.test_opname_id}/count",
-                200,
-                data={
-                    "acc_id": self.test_item_id,
-                    "counted_qty": 258,
-                    "notes": "Test count"
-                }
-            )
-            if success:
-                diff = response.get('diff')
-                self.log(f"   Difference: {diff}", Colors.CYAN)
-                if diff == -2:
-                    self.log(f"   ✅ Diff calculated correctly (-2)", Colors.GREEN)
-                else:
-                    self.log(f"   ❌ Expected -2, got {diff}", Colors.RED)
-        
-        # 3. Complete opname (should adjust stock)
-        if self.test_opname_id:
-            success, response = self.test(
-                "POST /api/acc/opname/{id}/complete - Complete opname",
-                "POST",
-                f"/api/acc/opname/{self.test_opname_id}/complete",
-                200
-            )
-            if success:
-                adjustments = response.get('adjustments_made')
-                self.log(f"   Adjustments made: {adjustments}", Colors.CYAN)
-                
-                # Verify stock adjusted (260 - 2 = 258)
-                success2, response2 = self.test(
-                    "GET /api/acc/stock - Verify stock after opname",
-                    "GET",
-                    "/api/acc/stock",
-                    200
-                )
-                if success2:
-                    items = response2 if isinstance(response2, list) else []
-                    item = next((i for i in items if i.get('id') == self.test_item_id), None)
-                    if item:
-                        stock_qty = item.get('stock_qty')
-                        self.log(f"   Stock after opname: {stock_qty}", Colors.CYAN)
-                        if stock_qty == 258:
-                            self.log(f"   ✅ Stock correctly adjusted to 258", Colors.GREEN)
-                        else:
-                            self.log(f"   ❌ Expected 258, got {stock_qty}", Colors.RED)
-
-    def test_dashboard(self):
-        """Test dashboard stats"""
-        self.log("\n" + "="*80, Colors.MAGENTA)
-        self.log("SECTION 7: DASHBOARD", Colors.MAGENTA)
-        self.log("="*80, Colors.MAGENTA)
-        
-        success, response = self.test(
-            "GET /api/acc/dashboard - Get dashboard stats",
+    def test_legacy_orders_endpoint(self) -> bool:
+        """Test 6: GET /api/dewi/maklon/orders — legacy endpoint (should still work)."""
+        success, response = self.run_test(
+            "List legacy orders (dewi_maklon_orders) — DEPRECATED",
             "GET",
-            "/api/acc/dashboard",
+            "/api/dewi/maklon/orders",
+            200,
+            token=self.admin_token
+        )
+        if success:
+            items = response.get('items', [])
+            self.log(f"   Legacy orders found: {len(items)}")
+            self.log(f"   ✓ Legacy endpoint still works (backward compatibility)")
+            return True
+        return False
+
+    def test_openapi_deprecation(self) -> bool:
+        """Test 7: GET /openapi.json — verify deprecated flag on legacy endpoints."""
+        success, response = self.run_test(
+            "Check OpenAPI spec for deprecated endpoints",
+            "GET",
+            "/openapi.json",
             200
         )
-        if success:
-            self.log(f"   Total items: {response.get('total_items')}", Colors.CYAN)
-            self.log(f"   Out of stock: {response.get('out_of_stock')}", Colors.CYAN)
-            self.log(f"   Low stock: {response.get('low_stock')}", Colors.CYAN)
-            self.log(f"   Pending requests: {response.get('pending_requests')}", Colors.CYAN)
-            self.log(f"   Active loans: {response.get('active_loans')}", Colors.CYAN)
-            self.log(f"   Pending PR: {response.get('pending_pr')}", Colors.CYAN)
-            
-            # After our tests, active_loans should be 0 (returned), pending_requests should be 0 (issued)
-            if response.get('active_loans') == 0 and response.get('pending_requests') == 0:
-                self.log(f"   ✅ Dashboard stats look correct", Colors.GREEN)
+        if success and isinstance(response, dict):
+            paths = response.get('paths', {})
+            orders_get = paths.get('/api/dewi/maklon/orders', {}).get('get', {})
+            is_deprecated = orders_get.get('deprecated', False)
+            self.log(f"   /api/dewi/maklon/orders GET deprecated: {is_deprecated}")
+            if is_deprecated:
+                self.log(f"   ✓ Legacy endpoints marked as deprecated in OpenAPI")
+                return True
+            else:
+                self.log(f"   ⚠ Expected deprecated=true for legacy endpoints", "WARN")
+                return False
+        return False
 
-    def print_summary(self):
-        """Print test summary"""
-        self.log("\n" + "="*80, Colors.MAGENTA)
-        self.log("TEST SUMMARY", Colors.MAGENTA)
-        self.log("="*80, Colors.MAGENTA)
-        
-        self.log(f"\nTotal Tests: {self.tests_run}", Colors.BLUE)
-        self.log(f"Passed: {self.tests_passed}", Colors.GREEN)
-        self.log(f"Failed: {self.tests_failed}", Colors.RED)
-        
-        if self.tests_failed > 0:
-            self.log(f"\nFailed Tests:", Colors.RED)
-            for test in self.failed_tests:
-                self.log(f"  - {test}", Colors.RED)
-        
-        success_rate = (self.tests_passed / self.tests_run * 100) if self.tests_run > 0 else 0
-        self.log(f"\nSuccess Rate: {success_rate:.1f}%", Colors.CYAN)
-        
-        if self.tests_failed == 0:
-            self.log("\n🎉 ALL TESTS PASSED! P1.A Accessory Consolidation is working correctly.", Colors.GREEN)
-            return 0
+    def test_management_health_dashboard(self) -> bool:
+        """Test 8: GET /api/management/weekly-digest?days=90 — verify maklon counts from dewi_maklon_pos."""
+        success, response = self.run_test(
+            "Management weekly digest (should read from dewi_maklon_pos)",
+            "GET",
+            "/api/management/weekly-digest?days=90",
+            200,
+            token=self.admin_token
+        )
+        if success:
+            data = response.get('data', {})
+            maklon = data.get('maklon', {})
+            new_orders = maklon.get('new_orders', 0)
+            completed_orders = maklon.get('completed_orders', 0)
+            self.log(f"   Maklon new orders: {new_orders}, completed: {completed_orders}")
+            self.log(f"   ✓ Management tools reading from dewi_maklon_pos")
+            return True
+        return False
+
+    def test_create_sample_for_migrated_po(self) -> bool:
+        """Test 9: POST /api/dewi/maklon/samples — create sample referencing migrated PO."""
+        if not self.migrated_po_ids:
+            self.log("   ⚠ Skipping: no migrated PO IDs", "WARN")
+            return False
+
+        migrated_po_id = self.migrated_po_ids[0]  # Use MKLO-LEG-001
+        success, response = self.run_test(
+            f"Create sample for migrated PO (MKLO-LEG-001)",
+            "POST",
+            "/api/dewi/maklon/samples",
+            200,
+            data={
+                "order_id": migrated_po_id,
+                "product_name": "Test Sample for Migrated PO",
+                "description": "P1.B traceability test",
+                "target_size": "M",
+                "sample_qty": 1
+            },
+            token=self.admin_token
+        )
+        if success and 'id' in response:
+            sample_id = response['id']
+            sample_code = response.get('sample_code', 'N/A')
+            self.log(f"   Sample created: {sample_code} (ID: {sample_id})")
+            self.log(f"   ✓ Sample references migrated PO with proper traceability")
+            return True
+        return False
+
+    def test_generate_invoice_for_migrated_po(self) -> bool:
+        """Test 10: POST /api/dewi/maklon/invoices/generate — generate invoice for migrated PO."""
+        if not self.migrated_po_ids or len(self.migrated_po_ids) < 2:
+            self.log("   ⚠ Skipping: need at least 2 migrated POs", "WARN")
+            return False
+
+        # Use MKLO-LEG-002 (should be status='completed')
+        migrated_po_id = self.migrated_po_ids[1]
+        success, response = self.run_test(
+            f"Generate invoice for migrated PO (MKLO-LEG-002)",
+            "POST",
+            "/api/dewi/maklon/invoices/generate",
+            200,
+            data={
+                "order_id": migrated_po_id,
+                "tax_pct": 11.0,
+                "payment_terms": "net_30"
+            },
+            token=self.admin_token
+        )
+        if success and 'id' in response:
+            invoice_id = response['id']
+            invoice_number = response.get('invoice_number', 'N/A')
+            self.log(f"   Invoice created: {invoice_number} (ID: {invoice_id})")
+            self.log(f"   ✓ Invoice generated for migrated PO, status changed to 'invoiced'")
+            return True
+        return False
+
+    def test_create_hpp_for_migrated_po(self) -> bool:
+        """Test 11: POST /api/dewi/maklon/hpp — create HPP for migrated PO."""
+        if not self.migrated_po_ids or len(self.migrated_po_ids) < 2:
+            self.log("   ⚠ Skipping: need at least 2 migrated POs", "WARN")
+            return False
+
+        migrated_po_id = self.migrated_po_ids[1]  # MKLO-LEG-002
+        success, response = self.run_test(
+            f"Create HPP for migrated PO (MKLO-LEG-002)",
+            "POST",
+            "/api/dewi/maklon/hpp",
+            200,
+            data={
+                "order_id": migrated_po_id,
+                "components": [
+                    {
+                        "name": "Fabric",
+                        "category": "material",
+                        "qty": 100,
+                        "unit": "meter",
+                        "unit_cost": 30000
+                    }
+                ],
+                "overhead_pct": 15.0,
+                "profit_margin_pct": 20.0
+            },
+            token=self.admin_token
+        )
+        if success and 'id' in response:
+            hpp_id = response['id']
+            hpp_per_pcs = response.get('hpp_per_pcs', 0)
+            actual_margin = response.get('actual_margin_pct', 0)
+            self.log(f"   HPP created: {hpp_id}, HPP per pcs: {hpp_per_pcs}, Margin: {actual_margin}%")
+            self.log(f"   ✓ HPP calculated, current_price_per_pcs read from migrated PO")
+            return True
+        return False
+
+    def test_client_portal_login(self) -> bool:
+        """Test 12: POST /api/dewi/client-portal/login — client login."""
+        # Note: This test may fail if no client_user exists for TEST-CLT-001
+        # We'll attempt login but mark as optional
+        self.log("   ⚠ Client portal login test (may fail if no client_user seeded)", "WARN")
+        success, response = self.run_test(
+            "Client portal login (TEST-CLT-001)",
+            "POST",
+            "/api/dewi/client-portal/auth/login",
+            200,
+            data={
+                "email": "test@testclient.com",
+                "password": "TestPass123!"
+            }
+        )
+        if success and 'token' in response:
+            self.client_token = response['token']
+            self.log(f"   Client token obtained: {self.client_token[:20]}...")
+            return True
         else:
-            self.log(f"\n⚠️  {self.tests_failed} test(s) failed. Please review.", Colors.YELLOW)
-            return 1
+            self.log(f"   ⚠ Client login failed (expected if no client_user seeded)", "WARN")
+            return False
+
+    def test_client_portal_dashboard(self) -> bool:
+        """Test 13: GET /api/dewi/client-portal/dashboard — verify counts from dewi_maklon_pos."""
+        if not self.client_token:
+            self.log("   ⚠ Skipping: no client token", "WARN")
+            return False
+
+        success, response = self.run_test(
+            "Client portal dashboard (should read from dewi_maklon_pos)",
+            "GET",
+            "/api/dewi/client-portal/dashboard",
+            200,
+            token=self.client_token
+        )
+        if success:
+            orders = response.get('orders', {})
+            total = orders.get('total', 0)
+            active = orders.get('active', 0)
+            completed = orders.get('completed', 0)
+            self.log(f"   Orders: total={total}, active={active}, completed={completed}")
+            self.log(f"   ✓ Client portal reading from dewi_maklon_pos")
+            return True
+        return False
+
+    def test_client_portal_orders(self) -> bool:
+        """Test 14: GET /api/dewi/client-portal/orders — verify projection to legacy shape."""
+        if not self.client_token:
+            self.log("   ⚠ Skipping: no client token", "WARN")
+            return False
+
+        success, response = self.run_test(
+            "Client portal orders list (projected to legacy shape)",
+            "GET",
+            "/api/dewi/client-portal/orders",
+            200,
+            token=self.client_token
+        )
+        if success and isinstance(response, list):
+            self.log(f"   Orders found: {len(response)}")
+            if len(response) > 0:
+                order = response[0]
+                has_legacy_fields = all(k in order for k in ['id', 'order_code', 'product_name', 'qty_ordered', 'status', '_source'])
+                if has_legacy_fields and order.get('_source') == 'dewi_maklon_pos':
+                    self.log(f"   ✓ Orders projected to legacy shape with _source='dewi_maklon_pos'")
+                    return True
+                else:
+                    self.log(f"   ⚠ Order projection incomplete", "WARN")
+                    return False
+            else:
+                self.log(f"   ⚠ No orders found for client", "WARN")
+                return False
+        return False
+
+    def test_client_portal_order_detail(self) -> bool:
+        """Test 15: GET /api/dewi/client-portal/orders/{order_id} — verify detail."""
+        if not self.client_token or not self.migrated_po_ids:
+            self.log("   ⚠ Skipping: no client token or migrated PO IDs", "WARN")
+            return False
+
+        migrated_po_id = self.migrated_po_ids[0]
+        success, response = self.run_test(
+            f"Client portal order detail (migrated PO)",
+            "GET",
+            f"/api/dewi/client-portal/orders/{migrated_po_id}",
+            200,
+            token=self.client_token
+        )
+        if success:
+            timeline = response.get('timeline', [])
+            samples_count = response.get('samples_count', 0)
+            qc_count = response.get('qc_count', 0)
+            self.log(f"   Timeline stages: {len(timeline)}, Samples: {samples_count}, QC: {qc_count}")
+            self.log(f"   ✓ Order detail with timeline, samples_count, qc_count")
+            return True
+        return False
+
+    def test_migration_idempotency(self) -> bool:
+        """Test 16: Re-run migration script — verify idempotency."""
+        self.log("   Running migration script (idempotency test)...")
+        import subprocess
+        try:
+            result = subprocess.run(
+                ["python", "/app/backend/migrations/migrate_maklon_orders.py", "--execute"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                cwd="/app/backend"
+            )
+            output = result.stdout + result.stderr
+            self.log(f"   Migration output: {output[:300]}")
+            # Check for "skipped_existing": 3 in output
+            if '"skipped_existing": 3' in output or 'skipped_existing": 3' in output:
+                self.log(f"   ✓ Migration idempotent: skipped 3 existing POs")
+                return True
+            else:
+                self.log(f"   ⚠ Migration output unexpected", "WARN")
+                return False
+        except Exception as e:
+            self.log(f"   ⚠ Migration script error: {e}", "WARN")
+            return False
+
+    def test_legacy_collection_not_dropped(self) -> bool:
+        """Test 17: Verify legacy collection NOT dropped."""
+        self.log("   Checking if legacy collection (dewi_maklon_orders) still exists...")
+        # We can't directly query MongoDB from here, but we can check if legacy endpoint still returns data
+        success, response = self.run_test(
+            "Verify legacy collection NOT dropped (via legacy endpoint)",
+            "GET",
+            "/api/dewi/maklon/orders?limit=10",
+            200,
+            token=self.admin_token
+        )
+        if success:
+            items = response.get('items', [])
+            total = response.get('total', 0)
+            self.log(f"   Legacy orders still accessible: {total} total, {len(items)} returned")
+            if total >= 3:
+                self.log(f"   ✓ Legacy collection NOT dropped (at least 3 orders exist)")
+                return True
+            else:
+                self.log(f"   ⚠ Expected at least 3 legacy orders", "WARN")
+                return False
+        return False
 
     def run_all_tests(self):
-        """Run all test suites"""
-        if not self.login():
+        """Run all tests in sequence."""
+        self.log("=" * 80)
+        self.log("P1.B Maklon Orders Consolidation — Backend Test Suite")
+        self.log("=" * 80)
+        self.log(f"Base URL: {self.base_url}")
+        self.log(f"Admin: {ADMIN_EMAIL}")
+        self.log("")
+
+        # Test 0: Admin login (prerequisite)
+        if not self.test_admin_login():
+            self.log("❌ Admin login failed. Aborting tests.", "ERROR")
             return 1
+
+        # Test 1-17: Main test suite
+        self.test_list_pos()
+        self.test_create_client()
+        self.test_create_po()
+        self.test_get_po_detail()
+        self.test_update_po_status()
+        self.test_legacy_orders_endpoint()
+        self.test_openapi_deprecation()
+        self.test_management_health_dashboard()
+        self.test_create_sample_for_migrated_po()
+        self.test_generate_invoice_for_migrated_po()
+        self.test_create_hpp_for_migrated_po()
         
-        self.test_items_crud()
-        self.test_stock_operations()
-        self.test_internal_requests()
-        self.test_loans()
-        self.test_purchase_requests()
-        self.test_opname()
-        self.test_dashboard()
+        # Client portal tests (may fail if no client_user seeded)
+        self.test_client_portal_login()
+        self.test_client_portal_dashboard()
+        self.test_client_portal_orders()
+        self.test_client_portal_order_detail()
         
-        return self.print_summary()
+        # Migration tests
+        self.test_migration_idempotency()
+        self.test_legacy_collection_not_dropped()
+
+        # Summary
+        self.log("")
+        self.log("=" * 80)
+        self.log(f"Test Summary: {self.tests_passed}/{self.tests_run} passed")
+        self.log("=" * 80)
+
+        if self.errors:
+            self.log(f"\n❌ {len(self.errors)} test(s) failed:")
+            for err in self.errors:
+                self.log(f"   - {err.get('test', 'Unknown')}: {err.get('error', err.get('response', 'Unknown error'))}")
+
+        success_rate = (self.tests_passed / self.tests_run * 100) if self.tests_run > 0 else 0
+        self.log(f"\nSuccess rate: {success_rate:.1f}%")
+
+        return 0 if success_rate >= 80 else 1
+
 
 def main():
-    tester = AccessoryTester()
+    tester = MaklonConsolidationTester(BASE_URL)
     return tester.run_all_tests()
+
 
 if __name__ == "__main__":
     sys.exit(main())

@@ -6,6 +6,12 @@ Auto WO Generation, Stage-Gate Validation, WO Sync.
 Collections:
 - dewi_maklon_clients:   Master database klien maklon
 - dewi_maklon_orders:    Order maklon dengan tracking workflow
+                         **DEPRECATED (P1.B 2026-05-22)** — SSOT moved to dewi_maklon_pos
+                         New endpoints at /api/dewi/maklon/pos/*. Order endpoints
+                         here remain for backward compatibility but emit a
+                         Deprecation header (`X-Deprecated-Endpoint: maklon-orders`).
+                         All consumers (client portal, billing, samples,
+                         management tools) now read from dewi_maklon_pos.
 """
 from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel, Field
@@ -19,6 +25,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix='/api/dewi/maklon', tags=['Dewi-Maklon'])
+
 
 # ─── STAGE CONFIG ────────────────────────────────────────────────────────────
 # Urutan stage produksi maklon
@@ -377,7 +384,7 @@ async def toggle_client_status(client_id: str, user: dict = Depends(require_auth
 # ORDER MANAGEMENT
 # ══════════════════════════════════════════════════════════════════════════════
 
-@router.get('/orders')
+@router.get('/orders', deprecated=True)
 async def list_orders(
     status: Optional[str] = None,
     client_id: Optional[str] = None,
@@ -400,7 +407,7 @@ async def list_orders(
     }
 
 
-@router.get('/orders/{order_id}')
+@router.get('/orders/{order_id}', deprecated=True)
 async def get_order(order_id: str, user: dict = Depends(require_auth)):
     db = get_db()
     order = await db.dewi_maklon_orders.find_one({'id': order_id})
@@ -410,7 +417,7 @@ async def get_order(order_id: str, user: dict = Depends(require_auth)):
     return order
 
 
-@router.post('/orders')
+@router.post('/orders', deprecated=True)
 async def create_order(payload: MaklonOrder, user: dict = Depends(require_auth)):
     db = get_db()
     client = await db.dewi_maklon_clients.find_one({'id': payload.client_id})
@@ -435,7 +442,7 @@ async def create_order(payload: MaklonOrder, user: dict = Depends(require_auth))
     return {'message': 'Order maklon berhasil dibuat', 'id': doc['id'], 'order_code': doc['order_code']}
 
 
-@router.put('/orders/{order_id}')
+@router.put('/orders/{order_id}', deprecated=True)
 async def update_order(order_id: str, payload: MaklonOrder, user: dict = Depends(require_auth)):
     db = get_db()
     existing = await db.dewi_maklon_orders.find_one({'id': order_id})
@@ -455,7 +462,7 @@ async def update_order(order_id: str, payload: MaklonOrder, user: dict = Depends
     return {'message': 'Order berhasil diperbarui'}
 
 
-@router.put('/orders/{order_id}/status')
+@router.put('/orders/{order_id}/status', deprecated=True)
 async def update_order_status(
     order_id: str,
     payload: OrderStatusIn,
@@ -541,7 +548,7 @@ async def update_order_status(
     return {'message': 'Status order diperbarui', 'status': new_status, 'progress_percentage': progress}
 
 
-@router.put('/orders/{order_id}/confirm')
+@router.put('/orders/{order_id}/confirm', deprecated=True)
 async def confirm_order(order_id: str, user: dict = Depends(require_auth)):
     """Confirm order (draft → confirmed) + auto-generate linked Work Orders."""
     db = get_db()
@@ -576,7 +583,7 @@ async def confirm_order(order_id: str, user: dict = Depends(require_auth)):
     }
 
 
-@router.put('/orders/{order_id}/stage-qty')
+@router.put('/orders/{order_id}/stage-qty', deprecated=True)
 async def update_stage_qty(
     order_id: str,
     payload: StageQtyIn,
@@ -654,7 +661,7 @@ def _calc_progress_from_stage_qty(order: dict, stage_qty: dict) -> int:
     return STAGE_PROGRESS.get(status, 0)
 
 
-@router.get('/orders/{order_id}/production-detail')
+@router.get('/orders/{order_id}/production-detail', deprecated=True)
 async def get_order_production_detail(order_id: str, user: dict = Depends(require_auth)):
     """Get detail produksi: order + linked WOs + stage qty summary."""
     db = get_db()
@@ -700,7 +707,7 @@ async def get_order_production_detail(order_id: str, user: dict = Depends(requir
     }
 
 
-@router.delete('/orders/{order_id}')
+@router.delete('/orders/{order_id}', deprecated=True)
 async def cancel_order(order_id: str, user: dict = Depends(require_auth)):
     db = get_db()
     order = await db.dewi_maklon_orders.find_one({'id': order_id})
@@ -727,7 +734,7 @@ class MaklonMaterialIssueIn(BaseModel):
     notes: Optional[str] = None
 
 
-@router.post('/orders/{order_id}/material-issues')
+@router.post('/orders/{order_id}/material-issues', deprecated=True)
 async def create_material_issue(order_id: str, payload: MaklonMaterialIssueIn, user: dict = Depends(require_auth)):
     """
     Buat permintaan pengeluaran material untuk order maklon.
@@ -807,7 +814,7 @@ async def create_material_issue(order_id: str, payload: MaklonMaterialIssueIn, u
     }
 
 
-@router.get('/orders/{order_id}/material-issues')
+@router.get('/orders/{order_id}/material-issues', deprecated=True)
 async def list_material_issues(order_id: str, user: dict = Depends(require_auth)):
     db = get_db()
     issues = await db.dewi_maklon_material_issues.find(
@@ -816,7 +823,7 @@ async def list_material_issues(order_id: str, user: dict = Depends(require_auth)
     return issues
 
 
-@router.delete('/orders/{order_id}/material-issues/{issue_id}')
+@router.delete('/orders/{order_id}/material-issues/{issue_id}', deprecated=True)
 async def cancel_material_issue(order_id: str, issue_id: str, user: dict = Depends(require_auth)):
     """
     Batalkan permintaan issue material.
