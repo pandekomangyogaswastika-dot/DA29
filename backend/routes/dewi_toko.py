@@ -33,7 +33,9 @@ from utils.helpers import _uid, _now, _clean, _clean_list
 from routes._toko_adapter import (
     get_or_create_toko_legacy_catalog,
     toko_product_to_catalog_item,
+    catalog_item_to_toko_product,
     toko_channel_to_platform_account,
+    platform_account_to_toko_channel,
     toko_sync_to_marketing,
 )
 import logging
@@ -43,46 +45,152 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix='/api/dewi/toko', tags=['Dewi-Toko'])
 
 
-# ── P1.D: Dual-write mirror helpers (writes also go to marketing_*) ─────────
+# ── P1.D cleanup (2026-05-23): SSOT is marketing_*. Legacy collections dropped.
+# Wrapper classes route reads/writes to marketing_* and auto-project legacy shape.
 
-async def _mirror_product(db, doc: dict):
-    """Mirror dewi_toko_products doc → marketing_catalog_items (idempotent upsert)."""
-    try:
-        catalog_id = await get_or_create_toko_legacy_catalog(db)
-        mirror = toko_product_to_catalog_item(doc, catalog_id)
-        await db.marketing_catalog_items.update_one(
-            {"id": mirror["id"]},
-            {"$set": mirror},
-            upsert=True,
+class _ScopedView:
+    """Wrap a motor collection so all queries are auto-scoped with `scope_filter`,
+    and find results are auto-projected via `to_legacy()`. Inserts auto-apply
+    `to_modern()` conversion.
+    """
+    def __init__(self, coll, scope_filter, to_modern, to_legacy):
+        self._c = coll
+        self._scope = scope_filter
+        self._to_modern = to_modern
+        self._to_legacy = to_legacy
+
+    def _q(self, query=None):
+        q = dict(query or {})
+        for k, v in self._scope.items():
+            q.setdefault(k, v)
+        return q
+
+    async def find_one(self, query=None, *args, **kwargs):
+        doc = await self._c.find_one(self._q(query), *args, **kwargs)
+        return self._to_legacy(doc) if doc else None
+
+    def find(self, query=None, *args, **kwargs):
+        cur = self._c.find(self._q(query), *args, **kwargs)
+        return _ScopedCursor(cur, self._to_legacy)
+
+    async def count_documents(self, query=None, *args, **kwargs):
+        return await self._c.count_documents(self._q(query), *args, **kwargs)
+
+    async def insert_one(self, doc, **kwargs):
+        modern = self._to_modern(doc) if self._to_modern else doc
+        return await self._c.insert_one(modern, **kwargs)
+
+    async def insert_many(self, docs, **kwargs):
+        modern_docs = [self._to_modern(d) if self._to_modern else d for d in docs]
+        return await self._c.insert_many(modern_docs, **kwargs)
+
+    async def update_one(self, query, update, **kwargs):
+        return await self._c.update_one(self._q(query), update, **kwargs)
+
+    async def update_many(self, query, update, **kwargs):
+        return await self._c.update_many(self._q(query), update, **kwargs)
+
+    async def delete_one(self, query, **kwargs):
+        return await self._c.delete_one(self._q(query), **kwargs)
+
+    async def delete_many(self, query, **kwargs):
+        return await self._c.delete_many(self._q(query), **kwargs)
+
+
+class _ScopedCursor:
+    """Lightweight async-cursor wrapper that projects results."""
+    def __init__(self, cur, to_legacy):
+        self._cur = cur
+        self._to_legacy = to_legacy
+
+    def sort(self, *a, **k):
+        self._cur = self._cur.sort(*a, **k)
+        return self
+
+    def skip(self, n):
+        self._cur = self._cur.skip(n)
+        return self
+
+    def limit(self, n):
+        self._cur = self._cur.limit(n)
+        return self
+
+    async def to_list(self, length=None):
+        docs = await self._cur.to_list(length=length)
+        return [self._to_legacy(d) for d in docs]
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        doc = await self._cur.__anext__()
+        return self._to_legacy(doc)
+
+
+# Cache the legacy catalog id at module level
+_LEGACY_CATALOG_CACHE: list = []
+
+
+async def _get_legacy_catalog_id(db):
+    if not _LEGACY_CATALOG_CACHE:
+        cid = await get_or_create_toko_legacy_catalog(db)
+        _LEGACY_CATALOG_CACHE.append(cid)
+    return _LEGACY_CATALOG_CACHE[0]
+
+
+def _legacy_products(db, catalog_id):
+    return _ScopedView(
+        db.marketing_catalog_items,
+        scope_filter={"_legacy_toko": True},
+        to_modern=lambda d: toko_product_to_catalog_item(d, catalog_id),
+        to_legacy=catalog_item_to_toko_product,
+    )
+
+
+def _legacy_channels(db):
+    return _ScopedView(
+        db.marketing_platform_accounts,
+        scope_filter={"_legacy_toko": True},
+        to_modern=toko_channel_to_platform_account,
+        to_legacy=platform_account_to_toko_channel,
+    )
+
+
+def _legacy_syncs(db):
+    return _ScopedView(
+        db.marketing_stock_syncs,
+        scope_filter={"_legacy_toko": True},
+        to_modern=toko_sync_to_marketing,
+        to_legacy=lambda d: d,  # syncs don't need reverse projection
+    )
+
+
+class _LazyProductsView(_ScopedView):
+    """Like _ScopedView for products, but lazily resolves catalog_id on writes."""
+
+    def __init__(self, db):
+        super().__init__(
+            db.marketing_catalog_items,
+            scope_filter={"_legacy_toko": True},
+            to_modern=None,  # resolved on insert
+            to_legacy=catalog_item_to_toko_product,
         )
-    except Exception as e:
-        logger.warning(f"[P1.D] _mirror_product failed: {e}")
+        self._db = db
+
+    async def insert_one(self, doc, **kwargs):
+        catalog_id = await _get_legacy_catalog_id(self._db)
+        modern = toko_product_to_catalog_item(doc, catalog_id)
+        return await self._c.insert_one(modern, **kwargs)
+
+    async def insert_many(self, docs, **kwargs):
+        catalog_id = await _get_legacy_catalog_id(self._db)
+        modern_docs = [toko_product_to_catalog_item(d, catalog_id) for d in docs]
+        return await self._c.insert_many(modern_docs, **kwargs)
 
 
-async def _mirror_channel(db, doc: dict):
-    """Mirror dewi_toko_channels doc → marketing_platform_accounts (idempotent)."""
-    try:
-        mirror = toko_channel_to_platform_account(doc)
-        await db.marketing_platform_accounts.update_one(
-            {"id": mirror["id"]},
-            {"$set": mirror},
-            upsert=True,
-        )
-    except Exception as e:
-        logger.warning(f"[P1.D] _mirror_channel failed: {e}")
-
-
-async def _mirror_sync_log(db, doc: dict):
-    """Mirror dewi_toko_channel_syncs doc → marketing_stock_syncs."""
-    try:
-        mirror = toko_sync_to_marketing(doc)
-        await db.marketing_stock_syncs.update_one(
-            {"id": mirror["id"]},
-            {"$set": mirror},
-            upsert=True,
-        )
-    except Exception as e:
-        logger.warning(f"[P1.D] _mirror_sync_log failed: {e}")
+def _lp(db):
+    """Legacy Products view backed by marketing_catalog_items."""
+    return _LazyProductsView(db)
 
 
 PRODUCT_UPLOAD_ROOT = Path('/app/uploads/products')
@@ -109,7 +217,7 @@ async def seed_toko_channels():
     db = get_db()
     # Batch fetch existing channel codes
     existing_codes = set()
-    async for d in db.dewi_toko_channels.find(
+    async for d in _legacy_channels(db).find(
         {'code': {'$in': list(SUPPORTED_CHANNELS)}}, {'_id': 0, 'code': 1}
     ):
         existing_codes.add(d['code'])
@@ -137,9 +245,7 @@ async def seed_toko_channels():
             'created_at': _now(),
             'updated_at': _now(),
         }
-        await db.dewi_toko_channels.insert_one(new_ch)
-        # P1.D: mirror to marketing_platform_accounts
-        await _mirror_channel(db, new_ch)
+        await _legacy_channels(db).insert_one(new_ch)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -209,14 +315,14 @@ async def list_products(
     if search:
         rx = {'$regex': re.escape(search), '$options': 'i'}
         q['$or'] = [{'sku_code': rx}, {'name': rx}]
-    items = await db.dewi_toko_products.find(q).sort('updated_at', -1).to_list(length=min(max(limit, 1), 1000))
+    items = await _lp(db).find(q).sort('updated_at', -1).to_list(length=min(max(limit, 1), 1000))
     return _clean_list(items)
 
 
 @router.get('/products/{pid}', deprecated=True)
 async def get_product(pid: str, user: dict = Depends(require_auth)):
     db = get_db()
-    p = await db.dewi_toko_products.find_one({'id': pid})
+    p = await _lp(db).find_one({'id': pid})
     if not p:
         raise HTTPException(404, 'Produk tidak ditemukan')
     return _clean(p)
@@ -226,7 +332,7 @@ async def get_product(pid: str, user: dict = Depends(require_auth)):
 async def create_product(payload: ProductIn, user: dict = Depends(require_auth)):
     db = get_db()
     sku = payload.sku_code.strip().upper()
-    existing = await db.dewi_toko_products.find_one({'sku_code': sku})
+    existing = await _lp(db).find_one({'sku_code': sku})
     if existing:
         raise HTTPException(400, f'SKU {sku} sudah terdaftar')
     # Ensure variant ids
@@ -246,15 +352,14 @@ async def create_product(payload: ProductIn, user: dict = Depends(require_auth))
         'updated_at': _now(),
         'created_by': user.get('name', 'System'),
     })
-    await db.dewi_toko_products.insert_one(doc)
-    await _mirror_product(db, doc)
+    await _lp(db).insert_one(doc)
     return {'message': 'Produk berhasil dibuat', 'id': doc['id'], 'sku_code': sku}
 
 
 @router.put('/products/{pid}', deprecated=True)
 async def update_product(pid: str, payload: ProductPatchIn, user: dict = Depends(require_auth)):
     db = get_db()
-    p = await db.dewi_toko_products.find_one({'id': pid})
+    p = await _lp(db).find_one({'id': pid})
     if not p:
         raise HTTPException(404, 'Produk tidak ditemukan')
     patch = {k: v for k, v in payload.model_dump(exclude_none=True).items()}
@@ -266,25 +371,16 @@ async def update_product(pid: str, payload: ProductPatchIn, user: dict = Depends
     if 'channel_prices' in patch:
         patch['channel_prices'] = [dict(cp) for cp in patch['channel_prices']]
     patch['updated_at'] = _now()
-    await db.dewi_toko_products.update_one({'id': pid}, {'$set': patch})
-    # P1.D: mirror to marketing
-    refreshed = await db.dewi_toko_products.find_one({'id': pid})
-    if refreshed:
-        await _mirror_product(db, refreshed)
+    await _lp(db).update_one({'id': pid}, {'$set': patch})
     return {'message': 'Produk diperbarui'}
 
 
 @router.delete('/products/{pid}', deprecated=True)
 async def delete_product(pid: str, user: dict = Depends(require_auth)):
     db = get_db()
-    res = await db.dewi_toko_products.delete_one({'id': pid})
+    res = await _lp(db).delete_one({'id': pid})
     if res.deleted_count == 0:
         raise HTTPException(404, 'Produk tidak ditemukan')
-    # P1.D: also delete mirror in marketing_catalog_items
-    try:
-        await db.marketing_catalog_items.delete_one({'id': pid})
-    except Exception:
-        pass
     return {'message': 'Produk dihapus'}
 
 
@@ -295,7 +391,7 @@ async def upload_product_photo(
     user: dict = Depends(require_auth),
 ):
     db = get_db()
-    prod = await db.dewi_toko_products.find_one({'id': pid})
+    prod = await _lp(db).find_one({'id': pid})
     if not prod:
         raise HTTPException(404, 'Produk tidak ditemukan')
     if file.content_type not in ALLOWED_MIMES:
@@ -319,7 +415,7 @@ async def upload_product_photo(
         f.write(data)
     url = f'/api/uploads/products/{pid}/{fname}'
 
-    await db.dewi_toko_products.update_one(
+    await _lp(db).update_one(
         {'id': pid},
         {'$push': {'photos': url}, '$set': {'updated_at': _now()}},
     )
@@ -333,10 +429,10 @@ class RemovePhotoIn(BaseModel):
 @router.post('/products/{pid}/photos/remove', deprecated=True)
 async def remove_product_photo(pid: str, payload: RemovePhotoIn, user: dict = Depends(require_auth)):
     db = get_db()
-    prod = await db.dewi_toko_products.find_one({'id': pid})
+    prod = await _lp(db).find_one({'id': pid})
     if not prod:
         raise HTTPException(404, 'Produk tidak ditemukan')
-    await db.dewi_toko_products.update_one(
+    await _lp(db).update_one(
         {'id': pid},
         {'$pull': {'photos': payload.url}, '$set': {'updated_at': _now()}},
     )
@@ -382,7 +478,7 @@ def _mask_creds(creds: dict) -> dict:
 async def list_channels(user: dict = Depends(require_auth)):
     db = get_db()
     await seed_toko_channels()
-    items = await db.dewi_toko_channels.find({}).sort('code', 1).to_list(length=50)
+    items = await _legacy_channels(db).find({}).sort('code', 1).to_list(length=50)
     for it in items:
         it['credentials'] = _mask_creds(it.get('credentials'))
     return _clean_list(items)
@@ -391,7 +487,7 @@ async def list_channels(user: dict = Depends(require_auth)):
 @router.put('/channels/{code}', deprecated=True)
 async def update_channel(code: str, payload: ChannelUpdateIn, user: dict = Depends(require_auth)):
     db = get_db()
-    ch = await db.dewi_toko_channels.find_one({'code': code})
+    ch = await _legacy_channels(db).find_one({'code': code})
     if not ch:
         raise HTTPException(404, 'Channel tidak ditemukan')
     patch = {k: v for k, v in payload.model_dump(exclude_none=True).items()}
@@ -406,11 +502,7 @@ async def update_channel(code: str, payload: ChannelUpdateIn, user: dict = Depen
                 merged[k] = v
         patch['credentials'] = merged
     patch['updated_at'] = _now()
-    await db.dewi_toko_channels.update_one({'code': code}, {'$set': patch})
-    # P1.D: mirror to marketing_platform_accounts
-    refreshed = await db.dewi_toko_channels.find_one({'code': code})
-    if refreshed:
-        await _mirror_channel(db, refreshed)
+    await _legacy_channels(db).update_one({'code': code}, {'$set': patch})
     return {'message': 'Channel diperbarui'}
 
 
@@ -434,7 +526,7 @@ def _mock_sync_provider(channel: dict) -> dict:
 @router.post('/channels/{code}/sync', deprecated=True)
 async def sync_channel(code: str, user: dict = Depends(require_auth)):
     db = get_db()
-    ch = await db.dewi_toko_channels.find_one({'code': code})
+    ch = await _legacy_channels(db).find_one({'code': code})
     if not ch:
         raise HTTPException(404, 'Channel tidak ditemukan')
     if not ch.get('enabled'):
@@ -455,9 +547,8 @@ async def sync_channel(code: str, user: dict = Depends(require_auth)):
             'mock': True,
             'triggered_by': user.get('name', 'System'),
         }
-        await db.dewi_toko_channel_syncs.insert_one(log_doc)
-        await _mirror_sync_log(db, log_doc)
-        await db.dewi_toko_channels.update_one(
+        await _legacy_syncs(db).insert_one(log_doc)
+        await _legacy_channels(db).update_one(
             {'code': code},
             {'$set': {
                 'last_sync_at': finished,
@@ -466,10 +557,6 @@ async def sync_channel(code: str, user: dict = Depends(require_auth)):
                 'updated_at': finished,
             }},
         )
-        # P1.D: mirror channel state to marketing
-        refreshed = await db.dewi_toko_channels.find_one({'code': code})
-        if refreshed:
-            await _mirror_channel(db, refreshed)
         return {
             'message': f'Sync {CHANNEL_LABELS.get(code, code)} berhasil (MOCK)',
             'counts': counts,
@@ -486,9 +573,8 @@ async def sync_channel(code: str, user: dict = Depends(require_auth)):
             'error': str(e),
             'triggered_by': user.get('name', 'System'),
         }
-        await db.dewi_toko_channel_syncs.insert_one(fail_doc)
-        await _mirror_sync_log(db, fail_doc)
-        await db.dewi_toko_channels.update_one(
+        await _legacy_syncs(db).insert_one(fail_doc)
+        await _legacy_channels(db).update_one(
             {'code': code},
             {'$set': {'last_sync_status': 'failed', 'last_sync_at': finished}},
         )
@@ -498,7 +584,7 @@ async def sync_channel(code: str, user: dict = Depends(require_auth)):
 @router.get('/channels/{code}/sync-history', deprecated=True)
 async def channel_sync_history(code: str, limit: int = 20, user: dict = Depends(require_auth)):
     db = get_db()
-    items = await db.dewi_toko_channel_syncs.find({'channel_code': code}).sort('started_at', -1).to_list(length=min(max(limit, 1), 100))
+    items = await _legacy_syncs(db).find({'channel_code': code}).sort('started_at', -1).to_list(length=min(max(limit, 1), 100))
     return _clean_list(items)
 
 
@@ -512,12 +598,12 @@ async def toko_dashboard(user: dict = Depends(require_auth)):
     await seed_toko_channels()
 
     # Product stats
-    total_products = await db.dewi_toko_products.count_documents({})
-    active_products = await db.dewi_toko_products.count_documents({'status': 'active'})
-    draft_products = await db.dewi_toko_products.count_documents({'status': 'draft'})
+    total_products = await _lp(db).count_documents({})
+    active_products = await _lp(db).count_documents({'status': 'active'})
+    draft_products = await _lp(db).count_documents({'status': 'draft'})
 
     # Low stock (< 10 total stock)
-    low_stock = await db.dewi_toko_products.count_documents({'status': 'active', 'stock_total': {'$lt': 10}})
+    low_stock = await _lp(db).count_documents({'status': 'active', 'stock_total': {'$lt': 10}})
 
     # Total inventory value (sum of stock_total * base_price)
     pipeline_value = [
@@ -525,11 +611,11 @@ async def toko_dashboard(user: dict = Depends(require_auth)):
         {'$group': {'_id': None, 'total': {'$sum': {'$multiply': ['$stock_total', '$base_price']}}}},
     ]
     total_value = 0
-    async for d in db.dewi_toko_products.aggregate(pipeline_value):
+    async for d in _lp(db).aggregate(pipeline_value):
         total_value = float(d.get('total') or 0)
 
     # Channels
-    channels = await db.dewi_toko_channels.find({}).sort('code', 1).to_list(length=50)
+    channels = await _legacy_channels(db).find({}).sort('code', 1).to_list(length=50)
     channel_cards = []
     enabled_channels = 0
     for c in channels:
@@ -544,11 +630,11 @@ async def toko_dashboard(user: dict = Depends(require_auth)):
         })
 
     # Top 5 products by sales_count_total
-    top_products = await db.dewi_toko_products.find({}).sort('sales_count_total', -1).limit(5).to_list(length=5)
+    top_products = await _lp(db).find({}).sort('sales_count_total', -1).limit(5).to_list(length=5)
     top_products = _clean_list(top_products)
 
     # Recent sync log (5 newest across channels)
-    recent_syncs = await db.dewi_toko_channel_syncs.find({}).sort('started_at', -1).limit(5).to_list(length=5)
+    recent_syncs = await _legacy_syncs(db).find({}).sort('started_at', -1).limit(5).to_list(length=5)
     recent_syncs = _clean_list(recent_syncs)
 
     return {

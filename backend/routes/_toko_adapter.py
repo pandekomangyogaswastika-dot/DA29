@@ -62,6 +62,40 @@ MKT_TO_TOKO_ORDER_STATUS: Dict[str, str] = {
 }
 
 
+# Field name translation map: toko field → marketing field (for update operations)
+TOKO_TO_MKT_ORDER_FIELDS: Dict[str, str] = {
+    "packed_at": "packed_date",
+    "shipped_at": "shipped_date",
+    "delivered_at": "delivered_date",
+    "cancelled_at": "cancelled_date",
+    "total_amount": "total_payment",
+    "customer_city": "city",
+    "notes": "note",
+    "order_number": "_legacy_order_number",
+    "order_ref": "order_id",
+}
+
+
+def translate_toko_order_update(update: Dict[str, Any]) -> Dict[str, Any]:
+    """Translate a MongoDB update doc with toko-shape fields to marketing-shape.
+
+    Handles `$set`, `$unset`, `$inc` operators with field name mapping.
+    """
+    if not isinstance(update, dict):
+        return update
+    out: Dict[str, Any] = {}
+    for op, val in update.items():
+        if op.startswith("$") and isinstance(val, dict):
+            translated = {}
+            for k, v in val.items():
+                new_k = TOKO_TO_MKT_ORDER_FIELDS.get(k, k)
+                translated[new_k] = v
+            out[op] = translated
+        else:
+            out[op] = val
+    return out
+
+
 TOKO_LEGACY_CATALOG_NAME = "Toko Legacy (Auto-Created)"
 
 
@@ -176,14 +210,22 @@ def toko_channel_to_platform_account(ch: Dict[str, Any]) -> Dict[str, Any]:
         "id": ch.get("id") or _id(),
         "platform": platform,
         "channel_code": code,  # preserve for back-compat
+        "code": code,  # alias for legacy filter compatibility
         "name": ch.get("name") or platform.capitalize(),
         "account_name": ch.get("account_name") or ch.get("name") or platform.capitalize(),
         "username": ch.get("username") or "",
         "shop_id": ch.get("shop_id") or "",
+        "enabled": bool(ch.get("enabled", False)),
+        "mock": bool(ch.get("mock", True)),
+        "credentials": ch.get("credentials") or {},
+        "fee_pct": float(ch.get("fee_pct") or 0),
+        "commission_pct": float(ch.get("commission_pct") or 0),
+        "notes": ch.get("notes") or "",
         "api_token_status": ch.get("api_token_status") or "not_set",
         "auto_sync_enabled": bool(ch.get("auto_sync_enabled", False)),
         "last_sync_at": ch.get("last_sync_at"),
         "last_sync_status": ch.get("last_sync_status") or "pending",
+        "last_sync_counts": ch.get("last_sync_counts") or {},
         "status": ch.get("status") or "active",
         "_legacy_toko": True,
         "_source": "dewi_toko_channels",
@@ -196,7 +238,7 @@ def platform_account_to_toko_channel(acc: Dict[str, Any]) -> Dict[str, Any]:
     """Project marketing_platform_accounts → dewi_toko_channels shape."""
     if not acc:
         return {}
-    code = acc.get("channel_code") or PLATFORM_TO_CHANNEL.get(
+    code = acc.get("code") or acc.get("channel_code") or PLATFORM_TO_CHANNEL.get(
         (acc.get("platform") or "").lower(), acc.get("platform") or "unknown"
     )
     return {
@@ -206,10 +248,17 @@ def platform_account_to_toko_channel(acc: Dict[str, Any]) -> Dict[str, Any]:
         "account_name": acc.get("account_name", ""),
         "username": acc.get("username", ""),
         "shop_id": acc.get("shop_id", ""),
+        "enabled": bool(acc.get("enabled", False)),
+        "mock": bool(acc.get("mock", True)),
+        "credentials": acc.get("credentials") or {},
+        "fee_pct": float(acc.get("fee_pct") or 0),
+        "commission_pct": float(acc.get("commission_pct") or 0),
+        "notes": acc.get("notes") or "",
         "api_token_status": acc.get("api_token_status", "not_set"),
         "auto_sync_enabled": bool(acc.get("auto_sync_enabled", False)),
         "last_sync_at": acc.get("last_sync_at"),
         "last_sync_status": acc.get("last_sync_status", "pending"),
+        "last_sync_counts": acc.get("last_sync_counts") or {},
         "status": acc.get("status", "active"),
         "_source": "marketing_platform_accounts",
         "created_at": acc.get("created_at"),

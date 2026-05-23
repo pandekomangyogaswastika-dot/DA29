@@ -90,16 +90,15 @@ async def main() -> int:
         )
         assert r.status_code == 200, f"US1 FAILED: {r.text}"
         pid = r.json()["id"]
-        legacy_p = await db.dewi_toko_products.find_one({"id": pid})
-        assert legacy_p is not None
+        # P1.D cleanup: legacy collection no longer used; check ONLY marketing_catalog_items
         mirror_p = await db.marketing_catalog_items.find_one({"id": pid})
-        assert mirror_p is not None, "Mirror not created in marketing_catalog_items"
+        assert mirror_p is not None, "Product not created in marketing_catalog_items"
         assert mirror_p["sku_code"] == sku.upper()
         assert mirror_p.get("_legacy_toko") is True
         assert mirror_p.get("catalog_id") is not None
-        results.append(("US1: Create product mirrors to marketing_catalog_items", True,
+        results.append(("US1: Create product goes directly to marketing_catalog_items", True,
                         f"sku={mirror_p['sku_code']}, catalog_id={mirror_p['catalog_id'][:8]}"))
-        print("[PASS] US1: product mirrored to marketing_catalog_items")
+        print("[PASS] US1: product written to marketing_catalog_items (SSOT)")
 
         # ───── US2: Update product ─────
         r = await client.put(

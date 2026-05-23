@@ -18,7 +18,11 @@ from pydantic import BaseModel, Field
 from database import get_db
 from auth import require_auth
 from utils.helpers import _uid, _now, _clean, _clean_list, _next_code
-from routes._toko_adapter import toko_order_to_marketing
+from routes._toko_adapter import (
+    toko_order_to_marketing,
+    marketing_to_toko_order,
+    translate_toko_order_update,
+)
 import logging
 
 logger = logging.getLogger(__name__)
@@ -26,18 +30,73 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix='/api/dewi/toko', tags=['Dewi-Toko-Orders'])
 
 
-# P1.D: Dual-write helper
-async def _mirror_order(db, doc: dict):
-    """Mirror dewi_toko_orders → marketing_orders (idempotent upsert)."""
-    try:
-        mirror = toko_order_to_marketing(doc)
-        await db.marketing_orders.update_one(
-            {"id": mirror["id"]},
-            {"$set": mirror},
-            upsert=True,
-        )
-    except Exception as e:
-        logger.warning(f"[P1.D] _mirror_order failed: {e}")
+# ── P1.D cleanup: SSOT is marketing_orders. Wrapper auto-projects shape ─────
+
+class _OrdersView:
+    """Wrapper that reads/writes marketing_orders (filtered _legacy_toko=True)
+    while exposing legacy dewi_toko_orders API contract.
+    """
+    def __init__(self, db):
+        self._c = db.marketing_orders
+
+    def _q(self, query=None):
+        q = dict(query or {})
+        q.setdefault("_legacy_toko", True)
+        return q
+
+    async def find_one(self, query=None, *a, **k):
+        doc = await self._c.find_one(self._q(query), *a, **k)
+        return marketing_to_toko_order(doc) if doc else None
+
+    def find(self, query=None, *a, **k):
+        cur = self._c.find(self._q(query), *a, **k)
+        return _OrdersCursor(cur)
+
+    async def count_documents(self, query=None, *a, **k):
+        return await self._c.count_documents(self._q(query), *a, **k)
+
+    async def insert_one(self, doc, **k):
+        return await self._c.insert_one(toko_order_to_marketing(doc), **k)
+
+    async def update_one(self, query, update, **k):
+        return await self._c.update_one(self._q(query), translate_toko_order_update(update), **k)
+
+    async def update_many(self, query, update, **k):
+        return await self._c.update_many(self._q(query), translate_toko_order_update(update), **k)
+
+    async def delete_one(self, query, **k):
+        return await self._c.delete_one(self._q(query), **k)
+
+
+class _OrdersCursor:
+    def __init__(self, cur):
+        self._cur = cur
+
+    def sort(self, *a, **k):
+        self._cur = self._cur.sort(*a, **k); return self
+
+    def skip(self, n):
+        self._cur = self._cur.skip(n); return self
+
+    def limit(self, n):
+        self._cur = self._cur.limit(n); return self
+
+    async def to_list(self, length=None):
+        docs = await self._cur.to_list(length=length)
+        return [marketing_to_toko_order(d) for d in docs]
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        d = await self._cur.__anext__()
+        return marketing_to_toko_order(d)
+
+
+def _lo(db):
+    """Legacy Orders view backed by marketing_orders."""
+    return _OrdersView(db)
+
 
 
 ORDER_STATUSES = ['new', 'packed', 'shipped', 'delivered', 'closed', 'cancelled']
@@ -92,7 +151,7 @@ class PackBatchIn(BaseModel):
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 async def _get_order_or_404(db, order_id: str):
-    doc = await db.dewi_toko_orders.find_one({'id': order_id})
+    doc = await _lo(db).find_one({'id': order_id})
     if not doc:
         raise HTTPException(status_code=404, detail='Order tidak ditemukan')
     return doc
@@ -122,21 +181,21 @@ async def list_orders(
             {'order_number': {'$regex': re.escape(search), '$options': 'i'}},
             {'order_ref': {'$regex': re.escape(search), '$options': 'i'}},
         ]
-    items = await db.dewi_toko_orders.find(filt).sort('created_at', -1).to_list(length=limit)
+    items = await _lo(db).find(filt).sort('created_at', -1).to_list(length=limit)
     return _clean_list(items)
 
 
 @router.get('/orders/summary', deprecated=True)
 async def orders_summary(user=Depends(require_auth)):
     db = get_db()
-    new_count = await db.dewi_toko_orders.count_documents({'status': 'new'})
-    packed_count = await db.dewi_toko_orders.count_documents({'status': 'packed'})
-    shipped_count = await db.dewi_toko_orders.count_documents({'status': 'shipped'})
+    new_count = await _lo(db).count_documents({'status': 'new'})
+    packed_count = await _lo(db).count_documents({'status': 'packed'})
+    shipped_count = await _lo(db).count_documents({'status': 'shipped'})
     today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-    delivered_today = await db.dewi_toko_orders.count_documents(
+    delivered_today = await _lo(db).count_documents(
         {'status': 'delivered', 'updated_at': {'$gte': datetime.fromisoformat(today_str + 'T00:00:00+00:00')}}
     )
-    total_today = await db.dewi_toko_orders.count_documents(
+    total_today = await _lo(db).count_documents(
         {'created_at': {'$gte': datetime.fromisoformat(today_str + 'T00:00:00+00:00')}}
     )
     return {
@@ -183,8 +242,7 @@ async def create_order(payload: OrderIn, user=Depends(require_auth)):
         'created_at': _now(),
         'updated_at': _now(),
     }
-    await db.dewi_toko_orders.insert_one(doc)
-    await _mirror_order(db, doc)
+    await _lo(db).insert_one(doc)
     return {'message': 'Order dibuat', 'id': doc['id'], 'order_number': code}
 
 
@@ -204,10 +262,7 @@ async def update_order(order_id: str, payload: OrderPatchIn, user=Depends(requir
     if not patch:
         raise HTTPException(status_code=422, detail='Tidak ada field yang diupdate')
     patch['updated_at'] = _now()
-    await db.dewi_toko_orders.update_one({'id': order_id}, {'$set': patch})
-    refreshed = await db.dewi_toko_orders.find_one({'id': order_id})
-    if refreshed:
-        await _mirror_order(db, refreshed)
+    await _lo(db).update_one({'id': order_id}, {'$set': patch})
     return {'message': 'Order diperbarui'}
 
 
@@ -226,10 +281,7 @@ async def update_order_status(order_id: str, payload: OrderStatusIn, user=Depend
         patch['packed_at'] = _now().isoformat()
     if payload.status == 'shipped':
         patch['shipped_at'] = _now().isoformat()
-    await db.dewi_toko_orders.update_one({'id': order_id}, {'$set': patch})
-    refreshed = await db.dewi_toko_orders.find_one({'id': order_id})
-    if refreshed:
-        await _mirror_order(db, refreshed)
+    await _lo(db).update_one({'id': order_id}, {'$set': patch})
     return {'message': f'Status diperbarui ke {payload.status}'}
 
 
@@ -239,13 +291,10 @@ async def cancel_order(order_id: str, user=Depends(require_auth)):
     doc = await _get_order_or_404(db, order_id)
     if doc['status'] not in ['new', 'packed']:
         raise HTTPException(status_code=400, detail='Hanya order berstatus new/packed yang bisa dibatalkan')
-    await db.dewi_toko_orders.update_one(
+    await _lo(db).update_one(
         {'id': order_id},
         {'$set': {'status': 'cancelled', 'updated_at': _now()}}
     )
-    refreshed = await db.dewi_toko_orders.find_one({'id': order_id})
-    if refreshed:
-        await _mirror_order(db, refreshed)
     return {'message': 'Order dibatalkan'}
 
 
@@ -273,7 +322,7 @@ async def create_pack_batch(payload: PackBatchIn, user=Depends(require_auth)):
     # Validate orders exist and are packable — batch fetch
     valid_order_ids = []
     if payload.order_ids:
-        async for d in db.dewi_toko_orders.find(
+        async for d in _lo(db).find(
             {'id': {'$in': payload.order_ids}}, {'_id': 0, 'id': 1, 'status': 1}
         ):
             if d.get('status') == 'new':
@@ -295,13 +344,10 @@ async def create_pack_batch(payload: PackBatchIn, user=Depends(require_auth)):
     await db.dewi_toko_pack_batches.insert_one(batch_doc)
     # Mark orders as packed
     if valid_order_ids:
-        await db.dewi_toko_orders.update_many(
+        await _lo(db).update_many(
             {'id': {'$in': valid_order_ids}},
             {'$set': {'status': 'packed', 'pack_batch_id': batch_doc['id'], 'packed_at': _now().isoformat(), 'updated_at': _now()}}
         )
-        # P1.D: mirror affected orders to marketing
-        async for refreshed in db.dewi_toko_orders.find({'id': {'$in': valid_order_ids}}):
-            await _mirror_order(db, refreshed)
     return {'message': f'Batch packing dibuat dengan {len(valid_order_ids)} order', 'id': batch_doc['id'], 'batch_code': code}
 
 

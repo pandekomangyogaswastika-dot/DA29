@@ -1,0 +1,74 @@
+{
+  "summary": "Completed comprehensive backend testing for P1.D Toko Consolidation + P1.A Accessory Cleanup. All 26 tests passed with 100% success rate. Verified legacy collections are empty/dropped and all CRUD operations route correctly to marketing_* and rahaza_* SSOT collections.",
+  "backend_issues": {
+    "critical_bugs": [],
+    "flaky_endpoints": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "passed_tests": [
+    "Authentication: Login successful",
+    "P1.D Verification: All 6 legacy dewi_toko_* collections are empty (unused)",
+    "P1.A Verification: acc_items and acc_stock_movements collections dropped",
+    "SSOT Verification: All 9 marketing_* and rahaza_* collections exist",
+    "Products: GET /api/dewi/toko/products - reads from marketing_catalog_items",
+    "Products: POST /api/dewi/toko/products - writes to marketing_catalog_items with _legacy_toko=true",
+    "Products: GET /api/dewi/toko/products/{id} - retrieves single product",
+    "Products: PUT /api/dewi/toko/products/{id} - updates persist in marketing_catalog_items",
+    "Products: DELETE /api/dewi/toko/products/{id} - deletes from marketing_catalog_items",
+    "Channels: GET /api/dewi/toko/channels - auto-seeds 8 channels in marketing_platform_accounts",
+    "Channels: PUT /api/dewi/toko/channels/shopee - updates persist with enabled=true, fee_pct=2.5",
+    "Channels: POST /api/dewi/toko/channels/shopee/sync - creates sync log in marketing_stock_syncs",
+    "Channels: GET /api/dewi/toko/channels/shopee/sync-history - retrieves sync logs",
+    "Orders: POST /api/dewi/toko/orders - creates order in marketing_orders with field translation (total_amount→total_payment)",
+    "Orders: GET /api/dewi/toko/orders - lists orders from marketing_orders",
+    "Orders: GET /api/dewi/toko/orders/{id} - retrieves single order",
+    "Orders: POST /api/dewi/toko/orders/{id}/status (packed) - updates status and sets packed_date",
+    "Orders: POST /api/dewi/toko/orders/{id}/status (shipped) - updates status, sets tracking_number and courier",
+    "Returns: POST /api/dewi/toko/returns - creates return in marketing_returns",
+    "Returns: GET /api/dewi/toko/returns - lists returns",
+    "Returns: POST /api/dewi/toko/returns/{id}/decision - updates decision to 'refund'",
+    "Reviews: POST /api/dewi/toko/reviews - creates review in marketing_reviews",
+    "Reviews: GET /api/dewi/toko/reviews - lists reviews",
+    "Reviews: PUT /api/dewi/toko/reviews/{id}/respond - updates status to 'responded' with response_text",
+    "Accessory: GET /api/acc/items - lists 10 accessories from rahaza_materials (type='accessory')",
+    "Accessory: POST /api/acc/items - creates accessory in rahaza_materials",
+    "Accessory: POST /api/acc/stock/receive - creates stock record in rahaza_material_stock and movement in rahaza_material_movements",
+    "Accessory: POST /api/acc/stock/issue - decreases stock correctly (10→7 after issuing 3)",
+    "Accessory: GET /api/acc/stock/movements - retrieves movements with domain='accessory'"
+  ],
+  "test_report_links": [
+    "/app/backend/toko_consolidation_test.py"
+  ],
+  "success_percentage": {
+    "backend": "100% (26/26 tests passed)",
+    "frontend": "N/A (backend-only testing as requested)"
+  },
+  "updated_files": [
+    "/app/backend/toko_consolidation_test.py"
+  ],
+  "action_item_for_main_agent": "",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_test_itself": false,
+  "detailed_findings": {
+    "p1d_verification": {
+      "legacy_collections_status": "All 6 dewi_toko_* collections are empty (count=0), confirming no writes to legacy collections",
+      "ssot_routing_verified": "All CRUD operations correctly route to marketing_catalog_items, marketing_platform_accounts, marketing_stock_syncs, marketing_orders, marketing_returns, marketing_reviews",
+      "field_translation_verified": "Order field translation working correctly (packed_at→packed_date, total_amount→total_payment, etc.)",
+      "legacy_flag_verified": "All documents tagged with _legacy_toko=true for filtering"
+    },
+    "p1a_verification": {
+      "legacy_collections_status": "acc_items and acc_stock_movements fully dropped (not present in DB)",
+      "ssot_routing_verified": "All accessory operations route to rahaza_materials (type='accessory'), rahaza_material_stock, rahaza_material_movements",
+      "stock_tracking_verified": "Stock movements correctly tracked with domain='accessory' flag",
+      "location_aware_stock": "Stock records created with location_id (ZNA-AKSESORIS)"
+    },
+    "preserved_collections": {
+      "dewi_toko_flashsales": "Preserved (no marketing equivalent)",
+      "dewi_toko_pack_batches": "Preserved (no marketing equivalent)"
+    }
+  }
+}

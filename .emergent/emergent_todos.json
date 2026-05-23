@@ -1,38 +1,46 @@
 [
   {
-    "content": "Phase 1: _toko_adapter.py - adapter dengan 12 fungsi konversi",
+    "content": "Phase A1: Drop acc_items + acc_stock_movements - DONE",
     "status": "completed"
   },
   {
-    "content": "Phase 2: POC poc_toko_consolidation.py - PASS 10/10",
+    "content": "Phase A2: dewi_maklon_orders read-flip - DEFERRED to Maklon frontend cutover session (complex stage_qty workflow)",
+    "status": "cancelled"
+  },
+  {
+    "content": "Phase A3: Flip reads dewi_toko.py via _ScopedView + _LazyProductsView wrappers",
     "status": "completed"
   },
   {
-    "content": "Phase 3: dewi_toko.py - dual-write helpers + mirror calls + 18 deprecated",
+    "content": "Phase A4: Flip reads dewi_online_orders.py via _OrdersView wrapper + field translation",
     "status": "completed"
   },
   {
-    "content": "Phase 4: dewi_online_orders.py - dual-write helper + mirror_order calls + 10 deprecated",
+    "content": "Phase A5: Flip reads dewi_returns.py via _ScopedShimView wrappers",
     "status": "completed"
   },
   {
-    "content": "Phase 5: dewi_returns.py - dual-write helpers + mirror_return/review + 12 deprecated",
+    "content": "Phase A6: Drop 6 legacy dewi_toko_* collections (data preserved in marketing_*)",
     "status": "completed"
   },
   {
-    "content": "Phase 6: 40 endpoint /api/dewi/toko/* sebagai deprecated=True - VERIFIED 40/40 via OpenAPI",
+    "content": "Phase A7: Remove dual-write mirror helpers (replaced by ScopedView pattern)",
     "status": "completed"
   },
   {
-    "content": "Phase 7: migrate_toko_data.py - dry-run + execute idempotent OK",
+    "content": "Phase A8: POC PASS 10/10 with SSOT-only routing",
     "status": "completed"
   },
   {
-    "content": "Phase 8: testing_agent_v3 - 16/17 PASS (94.1%), 0 critical bugs",
-    "status": "completed"
+    "content": "Phase A9: testing_agent_v3 to verify nothing broken",
+    "status": "in_progress"
   },
   {
-    "content": "Update PRD.md dan plan.md dengan progress P1.D",
-    "status": "completed"
+    "content": "Phase B+C (deferred): Frontend cutover + remove deprecated routes - separate session",
+    "status": "cancelled"
+  },
+  {
+    "content": "Update PRD.md dan plan.md dengan progress cleanup Phase A",
+    "status": "pending"
   }
 ]
