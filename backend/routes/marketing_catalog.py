@@ -459,7 +459,7 @@ async def _refresh_catalog_stats(db, catalog_id: str):
     )
 
 
-@router.post('/{catalog_id}/items')
+@router.post('/{catalog_id}/items', status_code=201)
 async def add_catalog_item(catalog_id: str, data: CatalogItemCreate, request: Request):
     """Tambah item/produk ke dalam katalog.
     
@@ -619,7 +619,7 @@ async def remove_catalog_item_photo(
 # FG MASTER INTEGRATION — Item creation from FG (catalog-scoped routes)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@router.post('/{catalog_id}/items/from-fg')
+@router.post('/{catalog_id}/items/from-fg', status_code=201)
 async def add_catalog_item_from_fg(catalog_id: str, data: CatalogItemFromFG, request: Request):
     """Tambah catalog item dari master FG produk.
     

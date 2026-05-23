@@ -371,7 +371,7 @@ class OrderCreateBody(BaseModel):
     note: Optional[str] = ""
 
 
-@router.post("")
+@router.post("", status_code=201)
 async def create_order(body: OrderCreateBody, request: Request):
     """Create a manual order in marketing_orders SSOT.
 
