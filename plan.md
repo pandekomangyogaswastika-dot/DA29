@@ -1,4 +1,4 @@
-# plan.md — P1.A Accessory Consolidation ✅ COMPLETED + P1.B Maklon Orders Consolidation ✅ COMPLETED + P1.C P2P Flow Completion ✅ COMPLETED + P1.D Legacy Toko Migration ✅ COMPLETED + **P1.A–D Cleanup Phase A (Post-monitoring)** ✅ COMPLETED
+# plan.md — P1.A Accessory Consolidation ✅ COMPLETED + P1.B Maklon Orders Consolidation ✅ COMPLETED + P1.C P2P Flow Completion ✅ COMPLETED + P1.D Legacy Toko Migration ✅ COMPLETED + **P1.A–D Cleanup Phase A (Post-monitoring)** ✅ COMPLETED + **P1.D Phase B–C (Toko Frontend Cutover + Route Removal)** ✅ COMPLETED
 
 ## 1) Objectives
 
@@ -42,38 +42,40 @@
 
 ---
 
-### P1.D — Legacy Toko Migration (`dewi_toko_*` → `marketing_*`) ✅ DONE
+### P1.D — Legacy Toko Migration (`dewi_toko_*` → `marketing_*`) ✅ DONE (FULLY COMPLETE)
 **Deprecate** 8 koleksi legacy toko dan konsolidasi ke SSOT marketing namespace.
 
-**Outcome yang dicapai:**
+**Outcome yang dicapai (end-to-end):**
 - ✅ Adapter lengkap (12 conversion functions) untuk mapping data legacy ↔ marketing.
-- ✅ Seluruh endpoint legacy `/api/dewi/toko/*` ditandai `deprecated=True` di OpenAPI (40/40 verified).
 - ✅ Migration script tersedia dan telah dieksekusi (idempotent).
+- ✅ Legacy collections (kecuali yang dipreserve) sudah di-drop di Phase A.
+- ✅ **Frontend cutover complete**: semua modul Toko (kecuali Flashsales & Pack Batches yang dipreserve) memakai `/api/marketing/*` langsung.
+- ✅ **Route Removal complete**: endpoint legacy yang tidak lagi dibutuhkan sudah dihapus.
 
-**Status objective P1.D:** selesai, diverifikasi oleh POC + migration + testing_agent_v3 (iteration_18: 16/17 PASS; 1 minor failure = test sequence issue, bukan bug).
+**Preserved (intentional, no SSOT equivalent yet):**
+- `dewi_toko_flashsales` (tetap di `/api/dewi/toko/flashsales*`)
+- `dewi_toko_pack_batches` (tetap di `/api/dewi/toko/pack-batches*`)
+
+**Tech debt reduction (Phase B–C Toko):**
+- ✅ ~1210 LOC dihapus dari backend routes
+- ✅ 31 deprecated endpoints dihapus
+
+**Testing:**
+- Phase B testing: `testing_agent_v3 iteration_23` = 95% (19/20) PASS
+- Phase C regression: `testing_agent_v3 iteration_24` = **100% (46/46) PASS**
 
 ---
 
 ### P1.A–D Cleanup Phase A (Post-monitoring 1 minggu) ✅ DONE
-**Goal:** drop legacy collections + flip backend reads/writes ke SSOT **tanpa mengubah kontrak API** (frontend tetap bisa memakai endpoint legacy).
+**Goal:** drop legacy collections + flip backend reads/writes ke SSOT **tanpa mengubah kontrak API** (frontend tetap bisa memakai endpoint legacy sementara).
 
 **Outcome yang dicapai:**
 - ✅ **9 legacy collections dropped** dari MongoDB:
   - `acc_items`, `acc_stock_movements`
   - `dewi_maklon_orders`
   - `dewi_toko_products`, `dewi_toko_channels`, `dewi_toko_channel_syncs`, `dewi_toko_orders`, `dewi_toko_returns`, `dewi_toko_reviews`
-- ✅ **Preserved (no SSOT equivalent yet):** `dewi_toko_flashsales`, `dewi_toko_pack_batches`
-- ✅ **Wrapper pattern introduced** untuk menjaga API-stable cleanup:
-  - `_ScopedView` (generic): Toko products/channels/syncs
-  - `_LazyProductsView`: products with lazy catalog_id
-  - `_OrdersView`: Toko orders with field translation
-  - `_ScopedShimView`: Toko returns/reviews
-  - `_MaklonOrdersView`: Maklon orders backed by `dewi_maklon_pos`
-- ✅ **Field translation maps** ditambahkan di adapters untuk handle legacy field names + status values
-- ✅ `server.py` index creation untuk koleksi legacy dibersihkan
-- ✅ Testing:
-  - 4 POCs all pass (39/39)
-  - `testing_agent_v3 iteration_20`: **21/21 PASS** (setelah agent self-fix 2 bug maklon detail)
+- ✅ Preserved (no SSOT equivalent yet): `dewi_toko_flashsales`, `dewi_toko_pack_batches`
+- ✅ Wrapper pattern diperkenalkan untuk menjaga API-stable cleanup (pada saat Phase A).
 
 **Status objective Cleanup Phase A:** selesai dan stabil.
 
@@ -110,13 +112,9 @@ User stories (Backend V1):
 5. ✅ Loan reduce/return restore stok dan tercatat.
 
 Steps:
-1. ✅ Refactor penuh `dewi_accessories_full.py` dengan prinsip “API facade”:
-   - ✅ MASTER: `acc_items` → `rahaza_materials (type='accessory')`
-   - ✅ STOCK: operasi stok → `rahaza_material_stock` + log ke `rahaza_material_movements`
-   - ✅ MOVEMENTS: query SSOT + enrich ke format legacy (IN/OUT + qty_signed)
-   - ✅ Preserve feature unik: `acc_internal_requests`, `acc_loans`, `acc_purchase_requests`, `acc_opname_sessions/lines`
-2. ✅ Update computations baca `rahaza_material_stock`
-3. ✅ Update side-effects: IR/loan/PR/opname menulis ke SSOT movements + stock
+1. ✅ Refactor penuh `dewi_accessories_full.py` dengan prinsip “API facade”.
+2. ✅ Update computations baca `rahaza_material_stock`.
+3. ✅ Update side-effects: IR/loan/PR/opname menulis ke SSOT movements + stock.
 
 Exit gate Phase 2:
 - ✅ Semua `/api/acc/*` berfungsi tanpa perubahan frontend
@@ -251,8 +249,8 @@ Steps:
    - ✅ Toko: `_ScopedView`, `_LazyProductsView`, `_OrdersView`, `_ScopedShimView`
    - ✅ Maklon: `_MaklonOrdersView` (backed by `dewi_maklon_pos`)
 3. ✅ Flip code reads/writes:
-   - ✅ `dewi_toko.py`, `dewi_online_orders.py`, `dewi_returns.py` now use marketing_* SSOT
-   - ✅ `dewi_maklon.py` now serves legacy `/orders` endpoints from `dewi_maklon_pos` SSOT
+   - ✅ `dewi_toko.py`, `dewi_online_orders.py`, `dewi_returns.py` use marketing_* SSOT
+   - ✅ `dewi_maklon.py` serves legacy `/orders` endpoints from `dewi_maklon_pos` SSOT
 4. ✅ Drop legacy collections:
    - ✅ `dewi_maklon_orders`
    - ✅ 6 `dewi_toko_*` collections (products/channels/syncs/orders/returns/reviews)
@@ -263,124 +261,129 @@ Steps:
 
 Exit gate Phase 20:
 - ✅ Tidak ada koleksi legacy tersisa selain yang memang dipreserve
-- ✅ Endpoint legacy tetap berjalan
+- ✅ Endpoint legacy tetap berjalan (saat itu)
 
 ---
 
-### Phase 21 — Phase B.1 Toko Backend Prep 🚧 IN PROGRESS
-**Goal:** menyediakan endpoint marketing-namespace untuk menggantikan endpoint legacy `/api/dewi/toko/*` yang selama ini berfungsi sebagai facade.
+### Phase 21 — Phase B.1 Toko Backend Prep ✅ COMPLETED
+**Goal:** menyediakan endpoint marketing-namespace untuk menggantikan endpoint legacy `/api/dewi/toko/*` sebagai facade.
 
-Scope:
-- Port endpoint dashboard:
+Scope (implemented):
+- ✅ Dashboard:
   - FROM: `/api/dewi/toko/dashboard`
   - TO: `/api/marketing/dashboard/toko-overview`
-- Port endpoint sync channel:
-  - FROM: `/api/dewi/toko/channels/{code}/sync` dan `/sync-history`
-  - TO: `/api/marketing/accounts/{id}/sync` dan `/sync-history`
-
-Steps:
-1. Tambah router/endpoint baru (disarankan file baru):
-   - `backend/routes/marketing_toko_dashboard_routes.py` (overview dashboard)
-   - `backend/routes/marketing_toko_sync_routes.py` (sync + sync history)
-2. Implement logic dengan membaca SSOT:
-   - products: `marketing_catalog_items` (khusus catalog `_toko_legacy`)
-   - channels/accounts: `marketing_platform_accounts` (filter `_legacy_toko=True`)
-   - sync logs: `marketing_stock_syncs`
-3. Daftarkan router baru di `server.py` (atau aggregator marketing router yang relevan).
-4. Test cepat via curl:
-   - `GET /api/marketing/dashboard/toko-overview`
-   - `POST /api/marketing/accounts/{id}/sync`
-   - `GET /api/marketing/accounts/{id}/sync-history`
+  - File: `backend/routes/marketing_toko_dashboard_routes.py`
+- ✅ Sync + Sync History:
+  - TO: `/api/marketing/accounts/{key}/sync` + `/sync-history`
+  - File: `backend/routes/marketing_toko_sync_routes.py`
+- ✅ Legacy-config (channel configuration replacement):
+  - TO: `/api/marketing/accounts/{key}/legacy-config`
+  - Masking secrets (`***1234`) in response
+- ✅ Orders backend coverage untuk frontend cutover:
+  - Added `POST /api/marketing/orders` (manual order create)
+  - Added `DELETE /api/marketing/orders/{id|order_id}`
+  - File: `backend/routes/marketing_orders_routes.py`
+- ✅ Catalog photo endpoints:
+  - `POST /api/marketing/catalogs/{catalog_id}/items/{item_id}/photos`
+  - `POST /api/marketing/catalogs/{catalog_id}/items/{item_id}/photos/remove`
+  - File: `backend/routes/marketing_catalog.py`
+- ✅ Router registrations in `server.py`
 
 Exit gate Phase 21:
-- Endpoint baru accessible, return JSON, dan tidak bergantung ke koleksi legacy yang sudah di-drop.
+- ✅ Endpoint baru accessible, return JSON, dan tidak bergantung ke koleksi legacy.
 
 ---
 
-### Phase 22 — Phase B.2 Toko Frontend Cutover (5 modul) ⏳ PLANNED
-**Goal:** pindahkan frontend Toko untuk menggunakan SSOT `/api/marketing/*` secara langsung (atau via endpoint marketing yang baru diprep).
+### Phase 22 — Phase B.2 Toko Frontend Cutover (5 modul) ✅ COMPLETED
+**Goal:** pindahkan frontend Toko untuk menggunakan SSOT `/api/marketing/*` langsung.
 
-Catatan penting:
-- **SKIP:** `TokoPricingFlashsaleModule.jsx` tetap memakai `/api/dewi/toko/flashsales/*` karena koleksi `dewi_toko_flashsales` **dipreserve** (belum ada SSOT marketing).
-- `pack-batches` juga dipreserve: endpoint `dewi/toko/pack-batches` tetap sementara.
-
-Sequence (sederhana → kompleks):
-1. `TokoCSReturnsModule.jsx`
+Scope (completed):
+1. ✅ `TokoCSReturnsModule.jsx`
    - FROM: `/api/dewi/toko/returns*` + `/api/dewi/toko/reviews*`
    - TO: `/api/marketing/returns*` + `/api/marketing/reviews*`
-2. `TokoOrdersModule.jsx`
+2. ✅ `TokoOrdersModule.jsx`
    - Orders:
      - FROM: `/api/dewi/toko/orders*`
      - TO: `/api/marketing/orders*`
    - Packing batches:
      - tetap: `/api/dewi/toko/pack-batches*` (**preserved**)
-3. `TokoProductCatalogModule.jsx`
+3. ✅ `TokoProductCatalogModule.jsx`
    - FROM: `/api/dewi/toko/products*`
    - TO: `/api/marketing/catalogs/{toko_legacy_catalog_id}/items*`
-   - Tambah helper untuk resolve `toko_legacy_catalog_id` (query `GET /api/marketing/catalogs` cari `_toko_legacy=true`).
-4. `TokoChannelManagerModule.jsx`
+   - Resolve `toko_legacy_catalog_id` via `GET /api/marketing/catalogs` filter `_toko_legacy=true`.
+4. ✅ `TokoChannelManagerModule.jsx`
    - FROM: `/api/dewi/toko/channels*` + `/sync` + `/sync-history`
-   - TO: `/api/marketing/accounts*` (filter `_legacy_toko=true`)
-   - TO (sync): `/api/marketing/accounts/{id}/sync` + `/sync-history`
-5. `TokoDashboardModule.jsx`
+   - TO: `/api/marketing/accounts?_legacy_toko=true`
+   - Sync + history via marketing endpoints
+   - Configure via `PUT /api/marketing/accounts/{key}/legacy-config`
+5. ✅ `TokoDashboardModule.jsx`
    - FROM: `/api/dewi/toko/dashboard`
    - TO: `/api/marketing/dashboard/toko-overview`
 
+Backfills (completed):
+- ✅ `/app/backend/migrations/backfill_marketing_legacy.py` (returns + reviews)
+- ✅ `/app/backend/migrations/backfill_marketing_products.py` (catalog items)
+
+Explicit exceptions:
+- ✅ **SKIP:** `TokoPricingFlashsaleModule.jsx` tetap memakai `/api/dewi/toko/flashsales/*` karena koleksi `dewi_toko_flashsales` dipreserve.
+
 Exit gate Phase 22:
-- 5 modul sudah tidak memanggil `/api/dewi/toko/*` untuk domain yang sudah punya SSOT marketing.
-- UI tetap fungsional walau ada perubahan minor naming field (e.g. `city` vs `customer_city`).
+- ✅ 5 modul sudah tidak memanggil `/api/dewi/toko/*` untuk domain yang sudah punya SSOT marketing.
 
 ---
 
-### Phase 23 — Phase B.3 Testing comprehensive ✅ REQUIRED
-Steps:
-1. Jalankan `testing_agent_v3` untuk semua flow Toko + regresi umum.
-2. Jika ada mismatch data-shape, lakukan penyesuaian frontend adapter / transform.
-3. Simpan report baru ke `/app/test_reports/iteration_*.json`.
+### Phase 23 — Phase B.3 Testing comprehensive ✅ COMPLETED
+- ✅ `testing_agent_v3 iteration_23`: 95% (19/20) PASS
+  - Fix minor: validasi file foto terlalu ketat (minimum bytes diturunkan)
+  - Fix by testing agent saat itu: legacy dashboard aggregation support
 
 Exit gate Phase 23:
-- Semua test critical PASS.
-- Tidak ada modul yang crash karena perubahan endpoint.
+- ✅ Semua test critical PASS.
 
 ---
 
-### Phase 24 — Phase C Toko Route Removal ⏳ PLANNED
+### Phase 24 — Phase C Toko Route Removal ✅ COMPLETED
 **Goal:** hapus endpoint legacy yang sudah tidak dipakai frontend setelah cutover.
 
-Scope:
-- Delete ±40 deprecated endpoints di:
-  - `backend/routes/dewi_toko.py`
-  - `backend/routes/dewi_returns.py`
-  - `backend/routes/dewi_online_orders.py`
+Scope (completed):
+- ✅ `dewi_toko.py` rewritten:
+  - 18 endpoints → 6 endpoints (flashsales only)
+  - Produk/channels/dashboard endpoints removed
+- ✅ `dewi_returns.py` rewritten:
+  - 12 endpoints → 0 (empty placeholder router)
+- ✅ `dewi_online_orders.py` rewritten:
+  - Orders endpoints removed
+  - pack-batches preserved: 3 endpoints
+- ✅ TOTAL:
+  - 31 endpoints deleted
+  - 9 preserved (6 flashsales + 3 pack-batches)
+- ✅ Pack-batches now writes directly to `marketing_orders` (no `_OrdersView` wrapper).
 
-Preserve (tetap hidup):
-- `flashsales` endpoints (`dewi_toko_flashsales` dipreserve)
-- `pack-batches` endpoints (`dewi_toko_pack_batches` dipreserve)
-
-Target outcome:
-- Reduksi file monster, target total reduction ~1500 LOC.
-- SSOT tunggal untuk Toko domain utama melalui `marketing_*` endpoints.
+Testing:
+- ✅ `testing_agent_v3 iteration_24`: **100% (46/46) PASS**
 
 Exit gate Phase 24:
-- Frontend tidak lagi mengakses endpoint yang dihapus.
-- `testing_agent_v3` rerun (optional) tidak menemukan 404 pada route yang dipakai.
+- ✅ Frontend tidak lagi mengakses endpoint yang dihapus.
+- ✅ Regression PASS (tidak ada route 404 pada flow yang masih digunakan).
 
 ---
 
 ## 3) Next Actions (Immediate)
 
-Karena **P1.A + P1.B + P1.C + P1.D + Cleanup Phase A + Phase C Maklon Route Removal sudah selesai**, fokus immediate berikutnya adalah **Toko Frontend Cutover** (Phase B) untuk memungkinkan penghapusan endpoint legacy.
+Karena **P1.A + P1.B + P1.C + P1.D + Cleanup Phase A + Phase B–C Toko selesai**, next actions sekarang berpindah ke unit kerja berikut:
 
-1. **Phase 21 — Phase B.1 Toko Backend Prep (IN PROGRESS)**
-   - Tambah endpoint marketing untuk dashboard + sync.
-2. **Phase 22 — Phase B.2 Toko Frontend Cutover (5 modul)**
-   - Cutover bertahap modul-per-modul (lebih aman) + quick smoke test tiap modul.
-3. **Phase 23 — Testing comprehensive (testing_agent_v3)**
-4. **Phase 24 — Phase C Toko Route Removal**
-   - Hapus 40 endpoint deprecated setelah frontend tidak lagi memakai.
+1. **P2 Workflow Consolidation (~180 jam)**
+   - Konsolidasi 14 workflow (Maklon 360°, HR Inbox, Production Control Tower, dll.)
+   - Target: eliminate workflow fragmentation, unify approvals, unify dashboarding.
 
-Catatan issue minor (terpisah):
-- `/openapi.json` return HTML (indikasi routing/proxy frontend fallback). URL yang benar saat ini: `/api/openapi.json`.
+2. **Tech Debt Resolution (P2): Split 7 monster files (>500/800 lines)**
+   - Target: patuhi `AGENT_DEVELOPMENT_RULES.md`, modularisasi, reduce coupling.
+
+3. **Bugfix / UX infra**
+   - `/openapi.json` return HTML (correct URL is `/api/openapi.json`) → perbaiki routing/proxy agar `/openapi.json` juga mengarah ke backend (optional tapi recommended).
+
+Catatan minor (low priority):
+- `POST /api/marketing/catalogs/{catalog_id}/items` currently returns HTTP 200 instead of 201 (convention only; functional OK).
 
 ---
 
@@ -404,23 +407,23 @@ Catatan issue minor (terpisah):
 
 ### P1.D (completed)
 - ✅ Toko SSOT migrated to `marketing_*`.
-- ✅ Legacy toko endpoints deprecated (40/40) dan tetap berjalan via wrapper.
-- ✅ Test: iteration_18 **16/17 PASS**.
+- ✅ Frontend cutover: 5 modul Toko memakai marketing endpoints.
+- ✅ Legacy route removal selesai; hanya flashsales + pack-batches yang dipreserve.
+- ✅ Testing:
+  - iteration_23: 95% PASS
+  - iteration_24: **100% PASS**
 
 ### Cleanup Phase A (completed)
-- ✅ 9 legacy collections dropped (listed above), preserved only 2 intentional collections.
-- ✅ Endpoint legacy tetap berfungsi dengan wrapper routing ke SSOT.
+- ✅ 9 legacy collections dropped, preserved only 2 intentional collections.
 - ✅ `server.py` indexes untuk legacy dibersihkan.
-- ✅ Testing: iteration_20 **21/21 PASS**.
 
-### Phase 21–24 (new)
-- ✅/🚧 Phase 21: endpoint marketing untuk dashboard+sync tersedia dan teruji via curl.
-- ⏳ Phase 22: 5 modul Toko cutover ke `/api/marketing/*` (flashsales+pack-batches tetap legacy preserved).
-- ✅ Phase 23: testing_agent_v3 PASS untuk flow Toko (serta regresi umum).
-- ⏳ Phase 24: 40 endpoint deprecated dihapus, tanpa 404 di frontend.
+### Phase 21–24 (completed)
+- ✅ Phase 21: marketing dashboard+sync+legacy-config endpoints tersedia + order create/delete + catalog photo endpoints.
+- ✅ Phase 22: 5 modul cutover ke `/api/marketing/*` (flashsales+pack-batches tetap legacy preserved).
+- ✅ Phase 23: testing pass (iteration_23).
+- ✅ Phase 24: legacy routes removed + regression pass (iteration_24).
 
 ### Session-level completion gate
-- ✅ PRD.md sudah diupdate dengan log P1.A + P1.B + P1.C + P1.D + Cleanup Phase A
 - ✅ Test reports tersimpan:
   - `/app/test_reports/iteration_15.json`
   - `/app/test_reports/iteration_16.json`
@@ -428,3 +431,6 @@ Catatan issue minor (terpisah):
   - `/app/test_reports/iteration_18.json`
   - `/app/test_reports/iteration_19.json`
   - `/app/test_reports/iteration_20.json`
+  - `/app/test_reports/iteration_22.json`
+  - `/app/test_reports/iteration_23.json`
+  - `/app/test_reports/iteration_24.json`
