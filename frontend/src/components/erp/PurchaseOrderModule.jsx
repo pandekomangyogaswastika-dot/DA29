@@ -154,7 +154,17 @@ export default function PurchaseOrderModule({ token, onNavigate }) {
   const openDetail = async (po) => {
     const r = await fetch(`/api/rahaza/purchase-orders/${po.id}`, { headers });
     if (r.ok) {
-      setSelectedPO(await r.json());
+      const detail = await r.json();
+      // P1.C: also fetch GR audit trail in parallel
+      try {
+        const gr_r = await fetch(`/api/rahaza/purchase-orders/${po.id}/grs`, { headers });
+        if (gr_r.ok) {
+          detail._grs = await gr_r.json();
+        }
+      } catch (e) {
+        // non-fatal
+      }
+      setSelectedPO(detail);
       setDetailModal(true);
     }
   };
@@ -268,11 +278,28 @@ export default function PurchaseOrderModule({ token, onNavigate }) {
     }
   };
 
-  const createGRFromPO = (po) => {
-    // Navigate to ReceivingModule with PO pre-filled
-    // This will be implemented when we update ReceivingModule
-    toast.info('Fitur Create GR dari PO akan tersedia setelah integrasi Warehouse selesai');
-    // onNavigate?.('wh-receiving', { po_id: po.id, po_number: po.po_number });
+  const createGRFromPO = async (po) => {
+    // P1.C: Call backend create-gr endpoint then navigate to receiving
+    try {
+      const r = await fetch(`/api/rahaza/purchase-orders/${po.id}/create-gr`, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notes: `Auto-created from PO ${po.po_number}` }),
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({ detail: 'Gagal membuat GR' }));
+        toast.error(err.detail || 'Gagal membuat GR dari PO');
+        return;
+      }
+      const gr = await r.json();
+      toast.success(`GR ${gr.receipt_number} berhasil dibuat dari PO ${po.po_number}. ${gr.items.length} item siap diterima.`);
+      // Navigate to ReceivingModule with the new GR id (let module handle the deep link)
+      onNavigate?.('wh-receiving', { receipt_id: gr.id, po_id: po.id, po_number: po.po_number });
+      fetchList();
+      setDetailModal(false);
+    } catch (e) {
+      toast.error('Gagal membuat GR: ' + (e?.message || ''));
+    }
   };
 
   if (loading) {
@@ -666,6 +693,50 @@ export default function PurchaseOrderModule({ token, onNavigate }) {
                 </table>
               </div>
             </div>
+
+            {/* P1.C: GR Audit Trail (Goods Receipts linked to this PO) */}
+            {(selectedPO._grs?.length || 0) > 0 && (
+              <div data-testid="po-detail-grs">
+                <h3 className="font-semibold mb-2 flex items-center gap-2">
+                  <TruckIcon className="w-4 h-4 text-blue-400" />
+                  Goods Receipts ({selectedPO._grs.length})
+                </h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="border-b border-[var(--glass-border)]">
+                      <tr className="text-left text-muted-foreground text-xs">
+                        <th className="pb-2">No. GR</th>
+                        <th className="pb-2">Tanggal</th>
+                        <th className="pb-2">Penerima</th>
+                        <th className="pb-2 text-right">Total Items</th>
+                        <th className="pb-2 text-right">Net Diterima</th>
+                        <th className="pb-2">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedPO._grs.map((gr, idx) => (
+                        <tr key={gr.id} className={`border-b border-[var(--glass-border)] ${idx % 2 === 0 ? 'bg-[var(--glass-bg)]/30' : ''}`} data-testid={`po-gr-row-${gr.id}`}>
+                          <td className="py-2 font-mono text-xs">{gr.receipt_number}</td>
+                          <td className="py-2 text-xs">{gr.created_at ? new Date(gr.created_at).toLocaleString('id-ID') : '-'}</td>
+                          <td className="py-2 text-xs">{gr.received_by || '-'}</td>
+                          <td className="py-2 text-right">{gr.items_count}</td>
+                          <td className="py-2 text-right font-mono text-emerald-400">{gr.total_net}</td>
+                          <td className="py-2">
+                            <span className={`inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                              gr.status === 'received' ? 'bg-green-400/15 border-green-300/25 text-green-300' :
+                              gr.status === 'draft' ? 'bg-slate-400/15 border-slate-300/25 text-slate-300' :
+                              'bg-amber-400/15 border-amber-300/25 text-amber-300'
+                            } border`}>
+                              {gr.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
 
             <div className="flex justify-between gap-2 pt-4 border-t border-[var(--glass-border)]">
               <div>

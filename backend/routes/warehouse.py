@@ -273,6 +273,51 @@ async def update_receiving(receipt_id: str, request: Request):
         items_to_process = body.get("items") or existing.get("items", [])
         loc_name = existing.get("location_name", "")
         loc_id   = existing.get("location_id", "")
+
+        # ── P1.C: Anti over-receive validation ─────────────────────────────
+        # Jika GR linked ke PO dan enforce_po_qty=True, validasi bahwa net_qty
+        # (received - rejected) untuk tiap material_id tidak melebihi qty
+        # remaining di PO.
+        po_id_link = existing.get("po_id")
+        enforce_po = bool(existing.get("enforce_po_qty", bool(po_id_link)))
+        if po_id_link and enforce_po:
+            po_doc = await db.rahaza_purchase_orders.find_one({"id": po_id_link}, {"_id": 0})
+            if po_doc:
+                # Build remaining map per material_id
+                remaining_map: dict = {}
+                for po_it in (po_doc.get("items") or []):
+                    mid = po_it.get("material_id")
+                    if not mid:
+                        continue
+                    remaining = max(
+                        0.0,
+                        float(po_it.get("qty_ordered") or 0) - float(po_it.get("qty_received") or 0),
+                    )
+                    remaining_map[mid] = remaining_map.get(mid, 0.0) + remaining
+
+                # Sum net_qty per material_id in this GR
+                net_per_material: dict = {}
+                for it in items_to_process:
+                    mid = it.get("material_id")
+                    if not mid:
+                        continue
+                    net = float(it.get("received_qty", 0)) - float(it.get("rejected_qty", 0))
+                    if net <= 0:
+                        continue
+                    net_per_material[mid] = net_per_material.get(mid, 0.0) + net
+
+                # Validate
+                for mid, net in net_per_material.items():
+                    remaining = remaining_map.get(mid, 0.0)
+                    if net - remaining > 0.0001:  # small epsilon for float
+                        # Find name for friendlier error
+                        mat = await db.rahaza_materials.find_one({"id": mid}, {"_id": 0, "name": 1, "code": 1})
+                        nm = (mat and (mat.get("name") or mat.get("code"))) or mid
+                        raise HTTPException(
+                            400,
+                            f"Over-receive ditolak untuk {nm}: net qty {net} melebihi sisa PO {remaining} "
+                            f"(PO {existing.get('po_number')}).",
+                        )
         
         # Batch prefetch existing warehouse_stock rows for all (sku, product_name)
         # at this single location to avoid N+1

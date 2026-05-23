@@ -27,7 +27,7 @@ const EMPTY_ITEM = () => ({
   expiry_date: '',  // U7: expiry date
 });
 
-export default function ReceivingModule({ token }) {
+export default function ReceivingModule({ token, deepLinkParams }) {
   const [receipts, setReceipts]   = useState([]);
   const [locations, setLocations] = useState([]);
   const [materials, setMaterials] = useState([]);
@@ -56,7 +56,7 @@ export default function ReceivingModule({ token }) {
         fetch('/api/wms/legacy/receiving',    { headers: { Authorization: `Bearer ${token}` } }),
         fetch('/api/wms/legacy/locations',    { headers: { Authorization: `Bearer ${token}` } }),
         fetch('/api/rahaza/materials?limit=500', { headers: { Authorization: `Bearer ${token}` } }),
-        // Sprint 2.1: Fetch approved POs
+        // Sprint 2.1: Fetch approved POs (also include partially_received for resume)
         fetch('/api/rahaza/purchase-orders?status=approved', { headers: { Authorization: `Bearer ${token}` } }),
       ]);
       if (rRes.ok) setReceipts(await rRes.json());
@@ -71,6 +71,16 @@ export default function ReceivingModule({ token }) {
   }, [token]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // P1.C: Open the just-created GR from PO (deep-link from PurchaseOrderModule)
+  useEffect(() => {
+    if (deepLinkParams?.receipt_id && receipts.length > 0) {
+      const gr = receipts.find(r => r.id === deepLinkParams.receipt_id);
+      if (gr) {
+        setShowDetail(gr);
+      }
+    }
+  }, [deepLinkParams, receipts]);
 
   // Sprint 1.1: When user picks a material from dropdown, auto-fill name + unit
   const handleMaterialPick = (idx, materialId) => {
@@ -221,6 +231,13 @@ export default function ReceivingModule({ token }) {
                     {r.items?.some(i => i.material_id) && (
                       <span className="ml-1.5 text-blue-400 font-medium">
                         <Link2 className="w-3 h-3 inline" /> synced
+                      </span>
+                    )}
+                    {/* P1.C: Show "From PO" badge if linked */}
+                    {r.po_number && (
+                      <span className="ml-1.5 text-emerald-400 font-medium">
+                        &bull; <Truck className="w-3 h-3 inline" /> Dari PO {r.po_number}
+                        {r.enforce_po_qty && <span className="ml-1 text-[10px] opacity-70">(qty terbatas)</span>}
                       </span>
                     )}
                   </p>

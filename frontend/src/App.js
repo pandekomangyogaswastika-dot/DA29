@@ -242,8 +242,11 @@ function App() {
     localStorage.removeItem('erp_portal');
   }, []);
 
-  const handleNavigate = useCallback((moduleId) => {
+  const [navParams, setNavParams] = useState({});
+
+  const handleNavigate = useCallback((moduleId, params = {}) => {
     setCurrentModule(moduleId);
+    setNavParams(params || {});
   }, []);
 
   // ── Memoize headers to prevent infinite re-render in child components ──
@@ -323,6 +326,7 @@ function App() {
             onLogout={handleLogout}
             onBack={handleBackToPortals}
             moduleId={currentModule}
+            deepLinkParams={navParams}
           />
         </Suspense>
         {/* Global AI Chatbot Widget */}
@@ -353,6 +357,7 @@ function App() {
             hasPerm={hasPerm}
             onNavigate={handleNavigate}
             moduleId={currentModule}
+            deepLinkParams={navParams}
           />
         </Suspense>
       </PortalShell>

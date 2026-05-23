@@ -445,7 +445,7 @@ async def update_po_received_qty(db, po_id: str, items_received: list):
     
     # Determine new status
     new_status = po.get("status")
-    if po.get("status") == "approved":
+    if po.get("status") in ("approved", "partially_received"):
         if total_received >= total_ordered:
             new_status = "fully_received"
         elif total_received > 0:
@@ -462,6 +462,227 @@ async def update_po_received_qty(db, po_id: str, items_received: list):
         }
     )
     log.info(f"PO {po.get('po_number')} updated: received {total_received}/{total_ordered}, status: {new_status}")
+
+
+# ── PO → GR helpers (P1.C: Create GR from PO + audit trail) ──────────────────
+
+async def compute_po_remaining(db, po_id: str) -> dict:
+    """Compute remaining qty per material_id for a PO. Returns:
+        {
+            "po": {...},
+            "items_remaining": [
+                {
+                    "po_item_id": str, "material_id": str, "material_name": str,
+                    "unit": str, "qty_ordered": float, "qty_received": float,
+                    "qty_remaining": float
+                },
+                ...
+            ],
+            "total_remaining": float
+        }
+    """
+    po = await db.rahaza_purchase_orders.find_one({"id": po_id}, {"_id": 0})
+    if not po:
+        return {"po": None, "items_remaining": [], "total_remaining": 0.0}
+    await _enrich_po(db, po)
+
+    items_out = []
+    total = 0.0
+    for it in (po.get("items") or []):
+        qty_ordered = float(it.get("qty_ordered") or 0)
+        qty_received = float(it.get("qty_received") or 0)
+        qty_remaining = max(0.0, round(qty_ordered - qty_received, 4))
+        items_out.append({
+            "po_item_id": it.get("id"),
+            "material_id": it.get("material_id"),
+            "material_code": it.get("material_code"),
+            "material_name": it.get("material_name"),
+            "material_type": it.get("material_type"),
+            "unit": it.get("unit"),
+            "qty_ordered": round(qty_ordered, 4),
+            "qty_received": round(qty_received, 4),
+            "qty_remaining": qty_remaining,
+            "unit_cost": float(it.get("unit_cost") or 0),
+            "notes": it.get("notes") or "",
+        })
+        total += qty_remaining
+    return {"po": po, "items_remaining": items_out, "total_remaining": round(total, 4)}
+
+
+@router.get("/purchase-orders/{po_id}/remaining")
+async def get_po_remaining(po_id: str, request: Request):
+    """P1.C: GET remaining qty per item untuk PO (untuk pre-fill GR di frontend)."""
+    await require_auth(request)
+    db = get_db()
+    res = await compute_po_remaining(db, po_id)
+    if not res["po"]:
+        raise HTTPException(404, "PO tidak ditemukan.")
+    return serialize_doc({
+        "po_id": res["po"]["id"],
+        "po_number": res["po"]["po_number"],
+        "vendor_name": res["po"]["vendor_name"],
+        "status": res["po"]["status"],
+        "items_remaining": res["items_remaining"],
+        "total_remaining": res["total_remaining"],
+    })
+
+
+@router.post("/purchase-orders/{po_id}/create-gr")
+async def create_gr_from_po(po_id: str, request: Request):
+    """P1.C: Create Goods Receipt (GR) draft dari PO.
+
+    Workflow:
+      - Validasi PO status ∈ {approved, partially_received}
+      - Hitung remaining qty per item
+      - Skip item yang fully received
+      - Buat GR draft di warehouse_receiving dengan:
+        * po_id, po_number, supplier_name = vendor_name
+        * items[*].expected_qty = qty_remaining
+        * items[*].material_id, material_name terisi
+        * enforce_po_qty = True (default; mencegah over-receive)
+      - Mengembalikan GR doc.
+
+    Body (optional):
+      - location_id, location_name: lokasi penerimaan default
+      - notes: catatan tambahan
+      - items_override: [{po_item_id, qty}] - jika hanya ingin partial GR
+    """
+    user = await _require_admin(request)
+    db = get_db()
+    body = await request.json() if (await request.body()) else {}
+
+    res = await compute_po_remaining(db, po_id)
+    po = res["po"]
+    if not po:
+        raise HTTPException(404, "PO tidak ditemukan.")
+    if po.get("status") not in ("approved", "partially_received"):
+        raise HTTPException(
+            400,
+            f"Hanya PO Approved/Partially Received yang bisa dibuatkan GR. Status saat ini: {po.get('status')}",
+        )
+    if res["total_remaining"] <= 0:
+        raise HTTPException(400, "Tidak ada qty tersisa untuk diterima.")
+
+    # Build override map (material_id -> qty) if provided
+    override_map: dict = {}
+    if isinstance(body.get("items_override"), list):
+        for ov in body["items_override"]:
+            po_item_id = ov.get("po_item_id")
+            try:
+                q = float(ov.get("qty") or 0)
+            except Exception:
+                q = 0.0
+            if po_item_id and q > 0:
+                override_map[po_item_id] = q
+
+    # Build GR items from PO remaining (skip 0)
+    gr_items = []
+    for ir in res["items_remaining"]:
+        if ir["qty_remaining"] <= 0:
+            continue
+        expected = ir["qty_remaining"]
+        if override_map and ir["po_item_id"] in override_map:
+            expected = min(override_map[ir["po_item_id"]], ir["qty_remaining"])
+        if expected <= 0:
+            continue
+        gr_items.append({
+            "id": _uid(),
+            "po_item_id": ir["po_item_id"],
+            "product_name": ir["material_name"] or ir["material_code"] or "Unknown",
+            "sku": ir["material_code"] or "",
+            "material_id": ir["material_id"],
+            "material_name": ir["material_name"] or ir["material_code"] or "Unknown",
+            "expected_qty": float(expected),
+            "received_qty": 0.0,
+            "rejected_qty": 0.0,
+            "unit": ir["unit"] or "pcs",
+            "unit_cost": float(ir["unit_cost"] or 0),
+            "inspection_status": "pending",
+            "inspection_notes": "",
+        })
+    if not gr_items:
+        raise HTTPException(400, "Tidak ada item yang bisa dibuatkan GR (semua sudah fully received).")
+
+    # Generate GR number
+    from pymongo import ReturnDocument
+    counter = await db.counters.find_one_and_update(
+        {"_id": "gr_number"},
+        {"$inc": {"seq": 1}},
+        upsert=True,
+        return_document=ReturnDocument.AFTER,
+    )
+    receipt_number = f"GR-{counter['seq']:05d}"
+
+    location_id = body.get("location_id", "")
+    location_name = body.get("location_name", "")
+    receipt = {
+        "id": _uid(),
+        "receipt_number": receipt_number,
+        "source_type": "supplier",
+        "source_ref": po.get("po_number") or "",
+        "supplier_name": po.get("vendor_name") or "",
+        "location_id": location_id,
+        "location_name": location_name,
+        "status": "draft",
+        "items": gr_items,
+        "notes": body.get("notes") or f"Auto-created from PO {po.get('po_number')}",
+        "received_by": user["name"],
+        "received_by_id": user["id"],
+        # PO linkage
+        "po_id": po["id"],
+        "po_number": po.get("po_number"),
+        # P1.C: enforce_po_qty default true → anti over-receive
+        "enforce_po_qty": True,
+        # Audit
+        "created_from": "po",
+        "created_at": _now(),
+        "updated_at": _now(),
+    }
+    await db.warehouse_receiving.insert_one(receipt)
+    await log_activity(
+        user["id"], user.get("name", ""),
+        "create_from_po", "warehouse_receiving",
+        f"Created GR {receipt_number} from PO {po.get('po_number')} ({len(gr_items)} items, {round(sum(i['expected_qty'] for i in gr_items),2)} total qty)",
+    )
+    return serialize_doc(receipt)
+
+
+@router.get("/purchase-orders/{po_id}/grs")
+async def list_grs_for_po(po_id: str, request: Request):
+    """P1.C: List semua GR yang terkait ke PO (untuk audit trail di PO detail)."""
+    await require_auth(request)
+    db = get_db()
+    po = await db.rahaza_purchase_orders.find_one({"id": po_id}, {"_id": 0, "po_number": 1, "id": 1})
+    if not po:
+        raise HTTPException(404, "PO tidak ditemukan.")
+
+    grs = await db.warehouse_receiving.find(
+        {"po_id": po_id},
+        {"_id": 0},
+    ).sort("created_at", -1).to_list(500)
+
+    # Compute summary per GR
+    summary = []
+    for gr in grs:
+        items = gr.get("items") or []
+        total_expected = sum(float(i.get("expected_qty") or 0) for i in items)
+        total_received = sum(float(i.get("received_qty") or 0) for i in items)
+        total_rejected = sum(float(i.get("rejected_qty") or 0) for i in items)
+        summary.append({
+            "id": gr["id"],
+            "receipt_number": gr.get("receipt_number"),
+            "status": gr.get("status"),
+            "created_at": gr.get("created_at"),
+            "received_by": gr.get("received_by"),
+            "location_name": gr.get("location_name"),
+            "items_count": len(items),
+            "total_expected": round(total_expected, 4),
+            "total_received": round(total_received, 4),
+            "total_rejected": round(total_rejected, 4),
+            "total_net": round(total_received - total_rejected, 4),
+            "enforce_po_qty": gr.get("enforce_po_qty", False),
+        })
+    return serialize_doc(summary)
 
 
 # ─── BULK CSV IMPORT ────────────────────────────────────────────────────────────
