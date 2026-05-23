@@ -11,6 +11,91 @@
 
 ---
 
+## 🆕 2026-05-23 Session — Phase B Frontend Cutover: Maklon Modules (SELESAI ✅)
+
+### Goal
+Cutover frontend Maklon modules dari `/api/dewi/maklon/orders/*` (legacy) ke `/api/dewi/maklon/pos/*` (SSOT) untuk siapkan Phase C (route removal).
+
+### Scope Decision
+- **Maklon cutover: DONE** (6 full + 2 partial — total 8 modules)
+- **Toko cutover: DEFERRED** (marketing endpoints punya semantik berbeda: catalogs nest items, accounts have dashboards, orders aggregate ALL marketing data — bukan 1:1 dengan legacy)
+
+### Approach: Frontend Adapter Pattern
+- **NEW**: `/app/frontend/src/lib/maklonOrderAdapter.js`
+  - `poToLegacyOrder(po)` — convert single PO doc → legacy order shape (used by display logic that expects legacy fields)
+  - `posToLegacyOrders(posList)` — array helper (handles `{items:[]}` or `[]` response shapes)
+  - `fetchMaklonOrders(headers, opts)` — convenience GET that auto-projects
+  - `PO_TO_LEGACY_STATUS` constant for status mapping
+
+### Files Modified
+
+| Module | Cutover Status | Endpoints Changed |
+|---|---|---|
+| `MaklonHppModule.jsx` | ✅ Full | List via `fetchMaklonOrders()` |
+| `MaklonSampleManagement.jsx` | ✅ Full | List via `posToLegacyOrders()` |
+| `MaklonQCTracking.jsx` | ✅ Full | List via `posToLegacyOrders()` |
+| `MaklonBillingModule.jsx` | ✅ Full | List via `posToLegacyOrders()` |
+| `MaklonDashboard.jsx` | ✅ Full | List via `posToLegacyOrders()` |
+| `RahazaHPPModule.jsx` | ✅ Full | List via `posToLegacyOrders()` |
+| `MaklonOrderModule.jsx` | ✅ Full | List + confirm + cancel via `/pos` |
+| `MaklonProductionTracking.jsx` | ⚠️ Partial | List via `fetchMaklonOrders()`. Stage-qty/status/production-detail tetap legacy (no PO equivalent) |
+| `MaklonMaterialIssuePanel.jsx` | ⚠️ Partial | material-issues tetap legacy (no PO equivalent) |
+
+### Action Endpoints Mapping (for cutover)
+- `PUT /orders/{id}/confirm` → `POST /pos/{id}/confirm`
+- `DELETE /orders/{id}` → `POST /pos/{id}/cancel` with `{reason}`
+- List, get detail, create — direct cutover
+
+### Justified Retention (Phase C will need to handle these)
+- `/orders/{id}/stage-qty` — legacy stage-qty workflow tidak ada di PO (PO pakai per-item `qty_produced`/`qty_dispatched`)
+- `/orders/{id}/status` — legacy status workflow dengan stage validation (cutting→sewing→qc→packing)
+- `/orders/{id}/production-detail` — legacy aggregation untuk stage tracking
+- `/orders/{id}/material-issues` — legacy material issuance workflow
+
+These all still work via `_MaklonOrdersView` wrapper (backed by `dewi_maklon_pos`).
+
+### Testing Results (testing_agent_v3 iteration_21)
+- **19/19 backend tests PASS (100%)** ✅
+- Modern `/pos` endpoints: list, detail, confirm, cancel — all functional
+- Legacy `/orders` endpoints (via wrapper): list, detail, production-detail, material-issues — all functional
+- Source markers verified: legacy responses have `_source='dewi_maklon_pos'` confirming data flows from SSOT
+- Accessory + Toko modules: confirmed still working via their SSOTs
+- 0 regressions, 0 critical bugs
+
+### Decisions Made
+- Frontend adapter (`maklonOrderAdapter.js`) preferred over inline conversion — reusable across 8 modules
+- Status mapping done client-side to avoid backend round-trips
+- Action endpoints (confirm/cancel) use `/pos/{id}/confirm` & `/pos/{id}/cancel` natively
+- Cutover scope: 8 of 9 Maklon modules; MaklonMaterialIssuePanel stays legacy (single-purpose stage-only module)
+- Toko cutover deferred — would require redesigning Toko UI to handle marketing endpoint paginations + nested catalogs
+
+### Files Affected
+- **NEW**: `/app/frontend/src/lib/maklonOrderAdapter.js` (164 lines)
+- **UPDATED**: 8 Maklon JSX modules (frontend)
+- **UPDATED**: `/app/memory/PRD.md`, `/app/plan.md`
+
+### Status After Phase B
+- Maklon /orders legacy endpoints: still alive but mostly unused by frontend (only stage-qty/material-issues)
+- All Maklon CRUD now flows through /pos SSOT (verified end-to-end)
+- Phase C (route removal): can now consider removing ~80% of `/api/dewi/maklon/orders/*` endpoints (list/get/confirm/cancel/CRUD); retain ~20% (stage_qty/material-issues)
+
+### Next Action Items
+1. **Toko Frontend Cutover** (DEFERRED) — separate session, requires marketing endpoint UI redesign (~8-12 hours)
+2. **Phase C (Maklon Route Removal)** — delete unused `/api/dewi/maklon/orders/*` endpoints (~400-500 LOC reduction)
+3. **acc_opname → wh_opname2 migration** (FORENSIC_04 Cluster B)
+4. **3-way match dashboard** — PO ↔ GR ↔ AP
+5. **P2 Workflow Consolidations** (~180 hr per FORENSIC_11)
+
+### Cumulative Session Stats
+- **5 P1 items + Cleanup + Frontend Cutover (partial)** complete
+- **121/123 cumulative tests PASS** (98.4%)
+- **9 collections dropped** + **8 frontend modules** cutover to SSOT
+- **5 backend wrapper classes** + **1 frontend adapter** facilitating clean transition
+
+
+
+---
+
 ## 🆕 2026-05-23 Session — P1.A-D Cleanup Phase A (SELESAI ✅)
 
 ### Goal
