@@ -1,42 +1,34 @@
 [
   {
-    "content": "Phase A1: Drop acc_items + acc_stock_movements",
+    "content": "Identifikasi 6 unused vs 6 used endpoints in dewi_maklon.py",
     "status": "completed"
   },
   {
-    "content": "Phase A2: dewi_maklon_orders read-flip via _MaklonOrdersView wrapper",
+    "content": "Delete MaklonOrderModule.jsx (dead code, redirected) + remove imports",
     "status": "completed"
   },
   {
-    "content": "Phase A3: Flip reads dewi_toko.py via _ScopedView wrappers",
+    "content": "Update MaklonDashboard nav target maklon-po",
     "status": "completed"
   },
   {
-    "content": "Phase A4: Flip reads dewi_online_orders.py via _OrdersView + field translation",
+    "content": "Remove 6 unused endpoints (list, get, create, update, confirm, cancel) from dewi_maklon.py",
     "status": "completed"
   },
   {
-    "content": "Phase A5: Flip reads dewi_returns.py via _ScopedShimView",
+    "content": "Remove orphan helpers _auto_generate_wos + _build_maklon_wo + MaklonOrder model",
     "status": "completed"
   },
   {
-    "content": "Phase A6: Drop 6 legacy dewi_toko_* + dewi_maklon_orders collections (9 total dropped)",
+    "content": "Verify 6 retained endpoints + run 4 POCs - all PASS",
     "status": "completed"
   },
   {
-    "content": "Phase A7: Remove dual-write mirror helpers + server.py indexes",
+    "content": "testing_agent_v3 iteration_22 - 18/18 PASS (100%) + 4 POCs all pass",
     "status": "completed"
   },
   {
-    "content": "Phase A8: 4 POCs re-pass: 39/39 user stories",
-    "status": "completed"
-  },
-  {
-    "content": "Phase A9: testing_agent_v3 iteration_20 - 21/21 PASS after agent fixed 2 bugs",
-    "status": "completed"
-  },
-  {
-    "content": "Update PRD.md dan plan.md dengan cleanup summary",
+    "content": "Update PRD.md dengan Phase C summary",
     "status": "completed"
   }
 ]

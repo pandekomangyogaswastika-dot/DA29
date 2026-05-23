@@ -11,6 +11,101 @@
 
 ---
 
+## 🆕 2026-05-23 Session — Phase C Maklon Route Removal (SELESAI ✅)
+
+### Goal
+Hapus endpoint legacy `/api/dewi/maklon/orders/*` yang sudah tidak dipakai frontend setelah Phase B cutover. Reduce code dengan aman.
+
+### Code Reduction Summary
+- **Backend** (`dewi_maklon.py`): 888 → 692 LOC = **-196 lines**
+- **Frontend** (`MaklonOrderModule.jsx` dihapus total): **-294 lines**
+- **Total: -490 LOC** + 9 collections dropped sebelumnya
+
+### Removed (6 endpoints)
+| Old Endpoint | Replacement |
+|---|---|
+| GET `/orders` | GET `/api/dewi/maklon/pos` |
+| GET `/orders/{id}` | GET `/api/dewi/maklon/pos/{po_id}` |
+| POST `/orders` | POST `/api/dewi/maklon/pos` |
+| PUT `/orders/{id}` | PUT `/api/dewi/maklon/pos/{po_id}` |
+| PUT `/orders/{id}/confirm` | POST `/api/dewi/maklon/pos/{po_id}/confirm` |
+| DELETE `/orders/{id}` | POST `/api/dewi/maklon/pos/{po_id}/cancel` |
+
+### Removed (3 orphan code blocks)
+- `_auto_generate_wos()` (28 LOC) — was only called by removed `confirm_order`
+- `_build_maklon_wo()` (37 LOC) — was only called by `_auto_generate_wos`
+- `MaklonOrder` Pydantic model (33 fields, 33 LOC) — was only used by removed POST/PUT endpoints
+
+Replacement: auto-WO generation now happens at `POST /api/dewi/maklon/pos/{po_id}/confirm` (multi-item PO model with WO per item, native to `dewi_maklon_pos.py`).
+
+### Removed (frontend)
+- **DELETED**: `/app/frontend/src/components/erp/MaklonOrderModule.jsx` (294 lines)
+- The route `maklon-orders` was already redirected to `maklon-po` (MaklonPOModule) in moduleRegistry.js, so this module was DEAD CODE.
+- Removed lazy import + registry entry. Redirect retained.
+- Updated `MaklonDashboard.jsx` to navigate to `maklon-po` instead of `maklon-orders`.
+
+### Retained (6 endpoints, justified)
+These power MaklonProductionTracking + MaklonMaterialIssuePanel (stage_qty + material-issues workflows have no PO equivalent yet):
+- PUT `/orders/{id}/status` — stage gate validation + WO sync
+- PUT `/orders/{id}/stage-qty` — per-stage qty input
+- GET `/orders/{id}/production-detail` — stage + WO aggregation
+- POST `/orders/{id}/material-issues` — issue from rahaza_material_stock
+- GET `/orders/{id}/material-issues` — list issuances
+- DELETE `/orders/{id}/material-issues/{issue_id}` — cancel issuance
+
+All these still flow through `_lmo(db)` wrapper backed by `dewi_maklon_pos`.
+
+### Testing Results (testing_agent_v3 iteration_22)
+- **18/18 backend tests PASS (100%)** ✅
+- **4 POCs all pass** (39/39 user stories combined):
+  - poc_accessory_ssot: 10/10 ✅
+  - poc_maklon_consolidation: 6/6 ✅
+  - poc_p2p_flow: 13/13 ✅
+  - poc_toko_consolidation: 10/10 ✅
+- 6 removed endpoints correctly return 404
+- 6 retained endpoints still working
+- New SSOT endpoints (`/pos/*`) all functional
+- OpenAPI verification: only 5 unique paths with 6 methods for `/api/dewi/maklon/orders/*` (matches expectation)
+- 0 regressions, 0 critical bugs
+
+### Files Affected
+- **UPDATED**: `/app/backend/routes/dewi_maklon.py` (-196 LOC)
+- **DELETED**: `/app/frontend/src/components/erp/MaklonOrderModule.jsx` (-294 LOC)
+- **UPDATED**: `/app/frontend/src/components/erp/moduleRegistry.js` (removed import + registry entry)
+- **UPDATED**: `/app/frontend/src/components/erp/MaklonDashboard.jsx` (nav target maklon-po)
+- **UPDATED**: `/app/memory/PRD.md`, `/app/plan.md`
+
+### Decisions Made
+- Conservative: keep 6 endpoints that power stage_qty workflow (Production + Material Issue)
+- Aggressive: removed all CRUD endpoints (replaced by /pos equivalents)
+- Frontend cleanup: deleted dead MaklonOrderModule (was redirected anyway)
+- Helpers removal: auto-WO generation logic moved entirely to `dewi_maklon_pos.py`
+
+### Cumulative Session Progress
+
+| Item | Tests | LOC Impact |
+|---|---|---|
+| P1.A Accessory Consolidation | 29/29 ✅ | +736 (new) -0 |
+| P1.B Maklon Orders Consolidation | 13/14 ✅ | +262 (adapter+migration) |
+| P1.C P2P Flow (Create GR from PO) | 23/23 ✅ | +280 (new endpoints) |
+| P1.D Legacy Toko Migration | 16/17 ✅ | +850 (adapter+routes) |
+| Cleanup Phase A | 21/21 ✅ | -120, -9 collections |
+| Phase B Maklon Cutover | 19/19 ✅ | +164 (frontend adapter) |
+| **Phase C Maklon Route Removal** | **18/18 ✅** | **-490 LOC** |
+
+**Total: 139/141 cumulative tests PASS (98.6%)** across 7 major tasks in this session.
+
+### Remaining Work (deferred)
+1. **Toko Frontend Cutover** — separate session, requires marketing endpoint UI redesign (~8-12 hours)
+2. **Toko Route Removal** — only possible after Toko frontend cutover (~600 LOC reduction)
+3. **acc_opname → wh_opname2 migration** (FORENSIC_04 Cluster B)
+4. **AP Invoice from GR + 3-way match dashboard**
+5. **P2 Workflow Consolidations** (~180 hr per FORENSIC_11)
+
+
+
+---
+
 ## 🆕 2026-05-23 Session — Phase B Frontend Cutover: Maklon Modules (SELESAI ✅)
 
 ### Goal
