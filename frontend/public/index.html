@@ -22,6 +22,16 @@
         Learn how to configure a non-root public URL by running `npm run build`.
         -->
         <title>Emergent | Fullstack App</title>
+        <script>
+          // Auto-redirect docs/spec URLs to backend (Kubernetes ingress routes /api/* only).
+          // Fixes: GET /openapi.json returned HTML SPA fallback because path lacked /api prefix.
+          (function () {
+            var p = window.location.pathname;
+            if (p === '/openapi.json' || p === '/docs' || p === '/redoc') {
+              window.location.replace('/api' + p + window.location.search);
+            }
+          })();
+        </script>
         <script>window.addEventListener("error",function(e){if(e.error instanceof DOMException&&e.error.name==="DataCloneError"&&e.message&&e.message.includes("PerformanceServerTiming")){e.stopImmediatePropagation();e.preventDefault()}},true);</script>
         <script src="https://assets.emergent.sh/scripts/emergent-main.js"></script>
     </head>
