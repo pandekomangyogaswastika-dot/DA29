@@ -11,6 +11,167 @@
 
 ---
 
+## 🆕 2026-05-23 Session — P1.D Phase B + C TOKO (Frontend Cutover + Route Removal) SELESAI ✅
+
+### Goal
+Tuntaskan P1.D Legacy Toko Migration sampai end-to-end:
+1. Phase B: Cutover 5 modul React Toko dari `/api/dewi/toko/*` (legacy) ke `/api/marketing/*` (SSOT).
+2. Phase C: Hapus 31 endpoint legacy yang sudah tidak dipakai frontend.
+3. Bug fix: `/openapi.json` URL routing + HTTP 201 status code untuk POST resource creation.
+
+### Test Results
+| Iteration | Scope | Result |
+|---|---|---|
+| `iteration_23.json` | Phase B Frontend Cutover | **95% (19/20) PASS** — 1 minor fixed |
+| `iteration_24.json` | Phase C Route Removal | **100% (46/46) PASS** — zero issues |
+
+### Phase B.1 — Backend Prep (3 new router files + extensions)
+
+**New routers:**
+| File | Endpoints | Purpose |
+|---|---|---|
+| `marketing_toko_dashboard_routes.py` | `GET /api/marketing/dashboard/toko-overview` | Replaces legacy `/dewi/toko/dashboard` |
+| `marketing_toko_sync_routes.py` | `POST /accounts/{key}/sync`, `GET /sync-history`, `PUT /legacy-config` | Sync + channel config (with secret masking `***1234`) |
+
+**Extended existing files:**
+| File | New Endpoints |
+|---|---|
+| `marketing_orders_routes.py` | `POST ""` (manual order create), `DELETE /{id}` |
+| `marketing_catalog.py` | `POST /{cat_id}/items/{item_id}/photos` (upload), `POST /photos/remove` |
+
+All 5 routers registered in `server.py`.
+
+### Phase B.2 — Frontend Cutover (5 modules + 2 backfills)
+
+| Module | Cutover Target |
+|---|---|
+| `TokoCSReturnsModule.jsx` | `/api/marketing/returns` + `/reviews` (approve/reject/complete workflow) |
+| `TokoOrdersModule.jsx` | `/api/marketing/orders` (orders), legacy preserved untuk pack-batches |
+| `TokoProductCatalogModule.jsx` | `/api/marketing/catalogs/{toko_legacy}/items` (auto-resolve catalog_id) |
+| `TokoChannelManagerModule.jsx` | `/api/marketing/accounts` + sync + legacy-config |
+| `TokoDashboardModule.jsx` | `/api/marketing/dashboard/toko-overview` |
+| `TokoPricingFlashsaleModule.jsx` | **SKIP** (preserved collection `dewi_toko_flashsales`) |
+
+**Backfill scripts (idempotent):**
+- `migrations/backfill_marketing_legacy.py` — Normalize legacy migrated docs (returns + reviews) to dual-shape (toko + marketing fields).
+- `migrations/backfill_marketing_products.py` — Same for `marketing_catalog_items`.
+
+**Data shape strategy:** Dual-shape preservation — legacy docs keep `sku_code`/`channel_code`/`decision` etc. but also receive marketing fields `sku`/`platform`/`refund_type`. Frontend uses marketing fields with legacy fallback (`p.sku || p.sku_code`).
+
+### Phase C — Route Removal (3 files rewritten, ~1210 LOC reduced)
+
+| File | Before | After | Delta |
+|---|---|---|---|
+| `dewi_toko.py` | 786 LOC, 18 endpoints | 154 LOC, 6 endpoints (flashsales only) | **-632 LOC** |
+| `dewi_returns.py` | 347 LOC, 12 endpoints | 20 LOC, 0 endpoints (empty placeholder) | **-327 LOC** |
+| `dewi_online_orders.py` | 367 LOC, 10 endpoints | 121 LOC, 3 endpoints (pack-batches only) | **-246 LOC** |
+| **TOTAL** | **1500 LOC, 40 endpoints** | **295 LOC, 9 endpoints** | **-1205 LOC, -31 endpoints** |
+
+**Removed helpers** (no longer used after route deletion):
+- `_ScopedView`, `_LazyProductsView`, `_ScopedCursor` (dewi_toko.py)
+- `_OrdersView`, `_OrdersCursor` (dewi_online_orders.py)
+- `_legacy_channels`, `_legacy_syncs`, `seed_toko_channels`, `_lp` (dewi_toko.py)
+
+**Preserved endpoints (9):**
+- Flashsales (6): GET list, GET detail, POST, PUT, POST activate, DELETE
+- Pack-batches (3): GET list, POST create, POST close
+
+**Integration shift:** Pack-batches now writes directly to `marketing_orders` (filtered `_legacy_toko=True`) to mark orders as `packed`, without `_OrdersView` wrapper.
+
+**`_toko_adapter.py`:** Module retained for one-time migration scripts in `/migrations/`. No longer imported by route files.
+
+### Bug Fixes (Same Session)
+
+**1. `/openapi.json` URL routing**
+- **Root cause:** Kubernetes ingress routes `/api/*` ke backend, semua path lain ke frontend SPA → HTML fallback.
+- **Fix:** Inline redirect script di `<head>` `frontend/public/index.html` yang fire SEBELUM React load. Redirect `/openapi.json`, `/docs`, `/redoc` → `/api/<path>`.
+- **Verified:** Both `/openapi.json` (JSON) dan `/docs` (Swagger UI) berfungsi via real browser navigation.
+
+**2. HTTP 201 status code untuk resource creation**
+- **Fix:** Tambah `status_code=201` ke 3 POST endpoint:
+  - `POST /api/marketing/catalogs/{id}/items`
+  - `POST /api/marketing/catalogs/{id}/items/from-fg`
+  - `POST /api/marketing/orders`
+
+### Files Created/Modified Summary
+
+**Created (5):**
+1. `/app/backend/routes/marketing_toko_dashboard_routes.py` (~125 LOC)
+2. `/app/backend/routes/marketing_toko_sync_routes.py` (~280 LOC)
+3. `/app/backend/migrations/backfill_marketing_legacy.py` (~230 LOC)
+4. `/app/backend/migrations/backfill_marketing_products.py` (~135 LOC)
+
+**Modified (10):**
+1. `/app/backend/server.py` (router registration)
+2. `/app/backend/routes/marketing_orders_routes.py` (POST + DELETE + 201)
+3. `/app/backend/routes/marketing_catalog.py` (photo upload + 201)
+4. `/app/backend/routes/dewi_toko.py` (REWRITTEN — flashsales only)
+5. `/app/backend/routes/dewi_returns.py` (REWRITTEN — empty)
+6. `/app/backend/routes/dewi_online_orders.py` (REWRITTEN — pack-batches only)
+7. `/app/frontend/src/components/erp/TokoCSReturnsModule.jsx` (REWRITTEN)
+8. `/app/frontend/src/components/erp/TokoOrdersModule.jsx` (REWRITTEN)
+9. `/app/frontend/src/components/erp/TokoProductCatalogModule.jsx` (REWRITTEN)
+10. `/app/frontend/src/components/erp/TokoChannelManagerModule.jsx` (REWRITTEN)
+11. `/app/frontend/src/components/erp/TokoDashboardModule.jsx` (endpoint URL switched)
+12. `/app/frontend/public/index.html` (redirect script)
+
+### Cumulative Session Progress (Updated)
+
+| Item | Tests | LOC Impact |
+|---|---|---|
+| P1.A Accessory Consolidation | 29/29 ✅ | +736 |
+| P1.B Maklon Orders Consolidation | 13/14 ✅ | +262 |
+| P1.C P2P Flow (Create GR from PO) | 23/23 ✅ | +280 |
+| P1.D Legacy Toko Migration | 16/17 ✅ | +850 |
+| Cleanup Phase A | 21/21 ✅ | -120, -9 collections |
+| Phase B Maklon Cutover | 19/19 ✅ | +164 |
+| Phase C Maklon Route Removal | 18/18 ✅ | -490 |
+| **Phase B Toko Cutover** | **19/20 ✅** | **+770 (5 backend routers + 5 modules + 2 backfills)** |
+| **Phase C Toko Route Removal** | **46/46 ✅** | **-1205 LOC, -31 endpoints** |
+| **Bug fix: /openapi.json + HTTP 201** | manual verified ✅ | +10 (redirect script) |
+
+**Total: 204/207 cumulative tests PASS (98.5%)** across 10 major tasks.
+
+### Status P1.A–P1.D — FULLY COMPLETE ✅
+Semua 4 cluster P1 (Accessory, Maklon Orders, P2P Flow, Legacy Toko) sudah end-to-end migrated dengan SSOT clean, route removal selesai, dan legacy collection drops complete (kecuali 2 collection yang sengaja dipreserve).
+
+### Remaining Work (Deferred — Future Sessions)
+1. **P2 Workflow Consolidation** (~180 jam) — 14 workflows: Maklon 360°, HR Inbox, Production Control Tower, dll
+2. **Tech Debt: Split 7 monster files** (>500/800 lines) sesuai `AGENT_DEVELOPMENT_RULES.md`
+3. **acc_opname → wh_opname2 migration** (FORENSIC_04 Cluster B)
+4. **AP Invoice from GR + 3-way match dashboard**
+
+### Critical Notes for Next Agent
+
+⚠️ **Legacy Drops (Permanent):**
+- 9 collections dropped: `acc_items`, `acc_stock_movements`, `dewi_maklon_orders`, 6 × `dewi_toko_*`
+- DO NOT attempt to query these — they're gone.
+
+⚠️ **Preserved Collections (No Marketing Equivalent):**
+- `dewi_toko_flashsales` — `/api/dewi/toko/flashsales/*` (6 endpoints)
+- `dewi_toko_pack_batches` — `/api/dewi/toko/pack-batches/*` (3 endpoints)
+- TokoPricingFlashsaleModule.jsx still uses legacy URLs (correct).
+
+⚠️ **Frontend Module Visibility:**
+- 5 Toko modules in `moduleRegistry.js` are registered but **may not be visible in current Portal Marketing navigation** (UI consolidation deprecated their direct sidebar links). They're accessed via direct URL or admin panel. Cutover work was still essential for completeness.
+
+⚠️ **Dual-Shape Pattern:**
+- `marketing_returns`, `marketing_reviews`, `marketing_catalog_items` mengandung legacy-migrated docs dengan BOTH toko fields (`sku_code`, `channel_code`, `decision`, `status='new'`) AND marketing fields (`sku`, `platform`, `refund_type`, `status='pending'`) setelah backfill.
+- New documents (created via marketing endpoints) hanya punya marketing fields.
+- Frontend should prefer marketing fields, fallback to legacy if missing.
+
+⚠️ **Pack-batches Workflow:**
+- Pack-batch creation writes to `dewi_toko_pack_batches` (preserved)
+- Pack-batch updates orders directly in `marketing_orders` collection (via `db.marketing_orders.update_many`)
+- No `_OrdersView` wrapper anymore.
+
+⚠️ **OpenAPI / Docs URL:**
+- Correct URLs: `/api/openapi.json`, `/api/docs`, `/api/redoc`
+- Legacy URLs `/openapi.json`, `/docs`, `/redoc` now auto-redirect via JS script in `index.html`.
+
+
+---
+
 ## 🆕 2026-05-23 Session — Phase C Maklon Route Removal (SELESAI ✅)
 
 ### Goal

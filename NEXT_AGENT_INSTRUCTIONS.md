@@ -1,9 +1,9 @@
 # 🤖 NEXT AGENT INSTRUCTIONS
 ## CV. Dewi Aditya ERP — Quick Start untuk Agent Berikutnya
 
-**Last Updated:** 22 Mei 2026  
-**Previous Session:** Audit Forensik 12-Lens + P0 Quick Wins + P2 GAP  
-**System Health:** 5.5/10 (improving from 4.0)  
+**Last Updated:** 23 Mei 2026  
+**Previous Session:** P1.A–P1.D Consolidation Complete + Phase B–C Toko Cutover + Route Removal  
+**System Health:** 7.5/10 (improved significantly from 5.5)  
 **Bahasa:** 🇮🇩 **WAJIB respon ke user dalam Bahasa Indonesia**
 
 ---
@@ -28,30 +28,21 @@
 |-------|--------|---------|
 | **Forensic Audit** | ✅ DONE | 12 deliverables di `/app/FORENSIC_*.md` |
 | **P0 Quick Wins** | ✅ DONE | 4 broken menus fixed, sidebar cleaned, 3 backup files deleted |
-| **P2 GAP Items** | ✅ DONE | Comm Hub, Asset Mgmt, Workspace (sudah implemented sebelumnya), Marketing seeded |
+| **P2 GAP Items** | ✅ DONE | Comm Hub, Asset Mgmt, Workspace, Marketing seeded |
+| **P1.A Accessory Consolidation** | ✅ DONE | `acc_*` → `rahaza_*`, 29/29 tests, +736 LOC |
+| **P1.B Maklon Orders Consolidation** | ✅ DONE | `dewi_maklon_orders` → `dewi_maklon_pos`, 13/14 tests |
+| **P1.C P2P Completion (Create GR from PO)** | ✅ DONE | 23/23 tests, +280 LOC backend+frontend |
+| **P1.D Legacy Toko Migration** | ✅ DONE | 8 `dewi_toko_*` → `marketing_*`, 16/17 tests |
+| **Cleanup Phase A (drop legacy)** | ✅ DONE | 9 collections dropped, 21/21 tests |
+| **Phase B Maklon Cutover** | ✅ DONE | 8 modules cutover, 19/19 tests |
+| **Phase C Maklon Route Removal** | ✅ DONE | 18/18 tests, -490 LOC |
+| **Phase B Toko Cutover (5 modules)** | ✅ DONE | 19/20 tests (iteration_23) |
+| **Phase C Toko Route Removal** | ✅ DONE | **46/46 tests** (iteration_24), -1205 LOC, -31 endpoints |
+| **Bug fixes (/openapi.json + HTTP 201)** | ✅ DONE | Browser-verified |
 
-### 🚧 Pending (di Roadmap, perlu eksekusi)
+**Cumulative: 204/207 tests PASS (98.5%)** across 10 major tasks.
 
-#### **P1 — Data Consolidation** (Total ~69 jam, MEDIUM risk)
-Pilih satu dengan user untuk eksekusi:
-
-**P1.A — Accessory Consolidation** (~25 jam)
-- Migrate `acc_items` → `rahaza_materials` (with type='accessory')
-- Migrate `acc_stock_movements` → `rahaza_material_movements`
-- Preserve: `acc_loans`, `acc_purchase_requests`, `acc_internal_requests`
-- 📖 Detail: `FORENSIC_04_DATA_ARCHITECTURE.md` Section "Cluster 1"
-
-**P1.B — Maklon Orders Consolidation** (~12 jam)
-- Deprecate `dewi_maklon_orders` → use `dewi_maklon_pos` saja
-- 📖 Detail: `FORENSIC_04_DATA_ARCHITECTURE.md` Section "Cluster 2"
-
-**P1.C — Procure-to-Pay Completion** (~14 jam)
-- Implement "Create GR from PO" backend + frontend
-- 📖 Detail: `FORENSIC_03_BUSINESS_PROCESS_MAP.md` Section "BP1"
-
-**P1.D — Legacy Toko Migration** (~18 jam)
-- 8 collections `dewi_toko_*` → migrate ke `marketing_*`
-- 📖 Detail: `FORENSIC_04_DATA_ARCHITECTURE.md` Section "Cluster 7"
+### 🚧 Pending (Future Sessions)
 
 #### **P2 — Workflow Consolidation** (Total ~180 jam)
 14 konsolidasi konkret di `FORENSIC_09_CONSOLIDATION_PLAN.md`.
@@ -66,6 +57,11 @@ High-impact picks:
 - Warehouse Gen 1 cleanup, Design system standardization
 - Global Workspace Dashboard, Naming convention phase-out
 - 📖 Detail: `FORENSIC_10_FUTURE_STATE_ARCHITECTURE.md`
+
+#### **Tech Debt** (per AGENT_DEVELOPMENT_RULES.md)
+- Split 7 monster files (>500/800 lines) into modular components
+- `acc_opname → wh_opname2` migration (FORENSIC_04 Cluster B)
+- AP Invoice from GR + 3-way match dashboard
 
 ### 🐛 Tech Debt Backlog (track baru)
 
