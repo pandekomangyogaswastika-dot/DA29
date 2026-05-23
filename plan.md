@@ -1,4 +1,4 @@
-# plan.md — P1.A Accessory Consolidation (SSOT: `rahaza_materials`) ✅ COMPLETED + P1.B Maklon Orders Consolidation (SSOT: `dewi_maklon_pos`) ✅ COMPLETED + P1.C P2P Flow Completion (Create GR from PO) ✅ COMPLETED
+# plan.md — P1.A Accessory Consolidation (SSOT: `rahaza_materials`) ✅ COMPLETED + P1.B Maklon Orders Consolidation (SSOT: `dewi_maklon_pos`) ✅ COMPLETED + P1.C P2P Flow Completion (Create GR from PO) ✅ COMPLETED + P1.D Legacy Toko Migration (SSOT: `marketing_*`) ✅ COMPLETED
 
 ## 1) Objectives
 
@@ -35,6 +35,17 @@
 - ✅ Frontend wiring selesai (tombol “Buat Goods Receipt” pada PO berfungsi end-to-end dan deep-link ke Receiving).
 
 **Status objective P1.C:** selesai, diverifikasi oleh POC + testing_agent_v3 (iteration_17: 23/23 PASS).
+
+### P1.D — Legacy Toko Migration (`dewi_toko_*` → `marketing_*`) ✅ DONE
+**Deprecate** 8 koleksi legacy toko dan konsolidasi ke SSOT marketing namespace dengan strategi **dual-write + migration + deprecation**.
+
+**Outcome yang dicapai:**
+- ✅ Adapter lengkap (12 conversion functions) untuk mapping data legacy ↔ marketing.
+- ✅ Dual-write: semua write ke `dewi_toko_*` otomatis di-mirror ke `marketing_*` (upsert by id, idempotent).
+- ✅ Semua endpoint legacy `/api/dewi/toko/*` ditandai `deprecated=True` di OpenAPI (40/40 verified).
+- ✅ Migration script tersedia dan telah dieksekusi (idempotent; tidak drop legacy).
+
+**Status objective P1.D:** selesai, diverifikasi oleh POC + migration + testing_agent_v3 (iteration_18: 16/17 PASS; 1 minor failure = test sequence issue, bukan bug).
 
 ---
 
@@ -286,26 +297,123 @@ Exit gate Phase 13:
 
 ---
 
+### Phase 14 — P1.D: Adapter (Legacy Toko ↔ Marketing) ✅ DONE
+**Target:** menyediakan konversi schema konsisten dan reusable untuk dual-write + migration.
+
+Steps:
+1. ✅ Buat adapter: `/app/backend/routes/_toko_adapter.py`
+   - 12 fungsi konversi utama:
+     - products ↔ catalog_items
+     - channels ↔ platform_accounts
+     - orders ↔ marketing_orders
+     - returns ↔ marketing_returns
+     - reviews ↔ marketing_reviews
+     - sync logs → marketing_stock_syncs
+   - Helper idempotent: `get_or_create_toko_legacy_catalog(db)` (auto-create parent `marketing_catalogs`)
+
+Exit gate Phase 14:
+- ✅ Adapter usable oleh route + migration
+
+---
+
+### Phase 15 — P1.D: POC Dual-Write ✅ DONE
+**Core workflow:** setiap write legacy toko memunculkan mirror di marketing_*.
+
+Steps:
+1. ✅ POC script: `/app/backend/migrations/poc_toko_consolidation.py`
+2. ✅ Validasi 10 user stories (products/channels/sync/orders/returns/reviews + OpenAPI deprecated)
+
+Exit gate Phase 15:
+- ✅ POC PASS 10/10
+
+---
+
+### Phase 16 — P1.D: Refactor Routes (Dual-Write + Deprecation) ✅ DONE
+**Target:** semua write endpoint legacy otomatis mirror ke SSOT marketing_*, tanpa mengubah frontend.
+
+Steps:
+1. ✅ Update `/app/backend/routes/dewi_toko.py`:
+   - Tambah mirror helpers: `_mirror_product`, `_mirror_channel`, `_mirror_sync_log`
+   - Inject mirror setelah create/update/delete
+   - Auto-seed channel juga mirror
+   - Mark 18 endpoints deprecated
+2. ✅ Update `/app/backend/routes/dewi_online_orders.py`:
+   - Tambah `_mirror_order`
+   - Mirror setelah create/update/status/cancel + batch packing flow
+   - Mark 10 endpoints deprecated
+3. ✅ Update `/app/backend/routes/dewi_returns.py`:
+   - Tambah `_mirror_return`, `_mirror_review`
+   - Mirror setelah create/update/decision/respond/flag
+   - Mark 12 endpoints deprecated
+
+Exit gate Phase 16:
+- ✅ Dual-write berjalan untuk 6 koleksi mapped
+- ✅ Tidak ada breaking change ke frontend legacy
+
+---
+
+### Phase 17 — P1.D: OpenAPI Deprecation Verification ✅ DONE
+Steps:
+1. ✅ Mark semua decorator endpoint pada 3 file route dengan `deprecated=True`
+2. ✅ Verifikasi via `/api/openapi.json`: 40/40 endpoint `/api/dewi/toko/*` deprecated
+
+Exit gate Phase 17:
+- ✅ OpenAPI menunjukkan deprecation untuk seluruh toko endpoints
+
+---
+
+### Phase 18 — P1.D: Data Migration Script + Execute ✅ DONE
+Steps:
+1. ✅ Buat script: `/app/backend/migrations/migrate_toko_data.py` (dry-run + execute)
+2. ✅ Execute migration (idempotent). Legacy collections **tidak di-drop**.
+3. ✅ Preserve (no marketing equivalent): `dewi_toko_flashsales`, `dewi_toko_pack_batches`
+
+Exit gate Phase 18:
+- ✅ Script idempotent (re-run skip existing)
+- ✅ Validasi counts sesuai
+
+---
+
+### Phase 19 — P1.D: Testing & Regression ✅ DONE
+Steps:
+1. ✅ `testing_agent_v3` iteration_18 → **16/17 PASS (94.1%)** (`/app/test_reports/iteration_18.json`)
+2. ✅ Catatan minor:
+   - “Cancel order” gagal karena order sudah shipped (aturan bisnis benar; test sequence issue, bukan bug)
+
+Exit gate Phase 19:
+- ✅ Tidak ada critical bugs
+- ✅ Dual-write + migration validated
+
+---
+
 ## 3) Next Actions (Immediate)
-Karena **P1.A + P1.B + P1.C sudah selesai**, next actions saat ini fokus ke backlog berikut:
+Karena **P1.A + P1.B + P1.C + P1.D sudah selesai**, fokus berikutnya adalah post-consolidation stabilization dan roadmap FORENSIC_11.
 
-1. **P1.D — Legacy Toko Migration** (~18 jam)
-   - Migrasi 8 koleksi `dewi_toko_*` → `marketing_*` (seed + mapping + idempotent migration)
-
-2. **Cleanup (post-monitoring 1 minggu) — P1.A + P1.B**
+1. **Cleanup (post-monitoring 1 minggu) — P1.A s/d P1.D**
    - Jika tidak ada rollback need:
      - Drop legacy `acc_items` + `acc_stock_movements`
      - Drop legacy `dewi_maklon_orders`
-   - Hapus route deprecated di `dewi_maklon.py` (mengurangi file monster)
+     - Drop legacy `dewi_toko_products`, `dewi_toko_channels`, `dewi_toko_channel_syncs`, `dewi_toko_orders`, `dewi_toko_returns`, `dewi_toko_reviews`
+   - Hapus route deprecated:
+     - `dewi_maklon.py` (orders endpoints)
+     - `dewi_toko.py`, `dewi_online_orders.py`, `dewi_returns.py` (toko endpoints)
+   - Output: pengurangan file monster (terutama `dewi_maklon.py`) dan mengurangi kompleksitas DB.
 
-3. **Phase 4 Finance (Future) — AP Invoice generation from GR**
+2. **Frontend cutover (recommended next)**
+   - Update 6 UI modules Toko (`Toko*Module.jsx`) untuk membaca langsung dari `/api/marketing/*` (bukan legacy `/api/dewi/toko/*`).
+   - Update UI Maklon (bila masih ada calls legacy) untuk memakai `/api/dewi/maklon/pos/*`.
+
+3. **acc_opname migration (related to P1.A, separate scope)**
+   - Migrasi `acc_opname_sessions/lines` → `wh_opname2_cycles/variances` (FORENSIC_04 Cluster B)
+
+4. **Phase 4 Finance (Future) — AP Invoice generation from GR**
    - Auto-generate AP invoice dari GR + 3-way match (PO ↔ GR ↔ AP)
 
-4. **3-way match dashboard (Future)**
+5. **3-way match dashboard (Future)**
    - Visualisasi PO ↔ GR ↔ AP + exception handling (qty mismatch, price mismatch, late delivery)
 
-5. **Task related (separate scope, recommended next)**
-   - Migrasi `acc_opname_sessions/lines` → `wh_opname2_cycles/variances` (FORENSIC_04 Cluster B)
+6. **P2 Workflow Consolidations (FORENSIC_11)**
+   - Maklon PO 360° View, HR Approval Inbox, Production Control Tower, dsb (~180 jam)
 
 ---
 
@@ -334,9 +442,22 @@ Karena **P1.A + P1.B + P1.C sudah selesai**, next actions saat ini fokus ke back
 - ✅ Frontend PO module: tombol “Create GR dari PO” berfungsi end-to-end + deep-link ke Receiving.
 - ✅ Test: iteration_17 **23/23 PASS**.
 
+### P1.D (completed)
+- ✅ Semua write legacy `/api/dewi/toko/*` mirrored ke SSOT `marketing_*`:
+  - products → `marketing_catalog_items` (dengan auto parent catalog `marketing_catalogs`)
+  - channels → `marketing_platform_accounts`
+  - channel_syncs → `marketing_stock_syncs`
+  - orders → `marketing_orders`
+  - returns → `marketing_returns`
+  - reviews → `marketing_reviews`
+- ✅ Endpoint legacy tetap berjalan (back-compat) namun seluruhnya deprecated (40/40 flagged di OpenAPI).
+- ✅ Migration script `migrate_toko_data.py` tersedia dan idempotent.
+- ✅ Test: iteration_18 **16/17 PASS** (minor failure = test sequencing; no critical bugs).
+
 ### Session-level completion gate
-- ✅ PRD.md sudah diupdate dengan log P1.A + P1.B + P1.C
+- ✅ PRD.md sudah diupdate dengan log P1.A + P1.B + P1.C + P1.D
 - ✅ Test reports tersimpan:
   - `/app/test_reports/iteration_15.json`
   - `/app/test_reports/iteration_16.json`
   - `/app/test_reports/iteration_17.json`
+  - `/app/test_reports/iteration_18.json`
