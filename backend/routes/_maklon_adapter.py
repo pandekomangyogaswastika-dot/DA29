@@ -74,6 +74,44 @@ LEGACY_TO_PO_STATUS: Dict[str, str] = {
 }
 
 
+# P1.B cleanup field translation: legacy order field → PO field
+LEGACY_TO_PO_ORDER_FIELDS: Dict[str, str] = {
+    "order_code": "po_number",
+    "order_date": "po_date",
+    "deadline_date": "deadline",
+    "linked_wo_ids": "_legacy_linked_wo_ids",
+    "stage_qty": "legacy_stage_qty",
+    "progress_percentage": "legacy_progress_pct",
+    "material_notes": "notes",
+    "completion_date": "legacy_completion_date",
+    "invoice_id": "ar_invoice_id",
+    "invoice_number": "ar_invoice_number",
+}
+
+
+def translate_legacy_order_update(update: Any) -> Any:
+    """Translate $set/$unset operators with legacy field names → PO field names.
+    Also maps status values when status is in $set.
+    """
+    if not isinstance(update, dict):
+        return update
+    out: Dict[str, Any] = {}
+    for op, val in update.items():
+        if op.startswith("$") and isinstance(val, dict):
+            translated = {}
+            for k, v in val.items():
+                # Translate field name
+                new_k = LEGACY_TO_PO_ORDER_FIELDS.get(k, k)
+                # Translate status value if mapping op
+                if k == "status" and isinstance(v, str) and op == "$set":
+                    v = LEGACY_TO_PO_STATUS.get(v, v)
+                translated[new_k] = v
+            out[op] = translated
+        else:
+            out[op] = val
+    return out
+
+
 def po_to_legacy_order(po: Dict[str, Any]) -> Dict[str, Any]:
     """Convert a `dewi_maklon_pos` document into a legacy `dewi_maklon_orders` shape.
 
@@ -296,25 +334,75 @@ def order_to_po_create_payload(order: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def find_maklon_record(db, order_or_po_id: str) -> Optional[Dict[str, Any]]:
-    """Look up a maklon record by id in BOTH `dewi_maklon_pos` (preferred) and
-    `dewi_maklon_orders` (legacy fallback). Returns the raw document with a
-    `_collection` marker so callers can branch behavior if needed.
+    """Look up a maklon record by id in `dewi_maklon_pos` (SSOT, P1.B cleanup
+    completed 2026-05-23). Legacy `dewi_maklon_orders` collection has been
+    deprecated. Returns the raw PO document with a `_collection` marker.
     """
     po = await db.dewi_maklon_pos.find_one({'id': order_or_po_id})
     if po:
         po['_collection'] = 'dewi_maklon_pos'
         return po
-    legacy = await db.dewi_maklon_orders.find_one({'id': order_or_po_id})
-    if legacy:
-        legacy['_collection'] = 'dewi_maklon_orders'
-        return legacy
-    # Also try by po_number / order_code
+    # Also try by po_number / order_code (legacy back-compat)
     po = await db.dewi_maklon_pos.find_one({'po_number': order_or_po_id})
     if po:
         po['_collection'] = 'dewi_maklon_pos'
         return po
-    legacy = await db.dewi_maklon_orders.find_one({'order_code': order_or_po_id})
-    if legacy:
-        legacy['_collection'] = 'dewi_maklon_orders'
-        return legacy
     return None
+
+
+# ── P1.B cleanup wrapper: dewi_maklon_orders → dewi_maklon_pos shim ─────────
+
+class _MaklonOrdersView:
+    """Wrap dewi_maklon_pos collection so callers can use legacy dewi_maklon_orders
+    API contract. Auto-projects via po_to_legacy_order on reads, auto-converts via
+    order_to_po_create_payload on inserts, translates field names + status on updates.
+    """
+    def __init__(self, db):
+        self._c = db.dewi_maklon_pos
+
+    async def find_one(self, query=None, *a, **k):
+        doc = await self._c.find_one(query or {}, *a, **k)
+        return po_to_legacy_order(doc) if doc else None
+
+    def find(self, query=None, *a, **k):
+        cur = self._c.find(query or {}, *a, **k)
+        return _MaklonOrdersCursor(cur)
+
+    async def count_documents(self, query=None, *a, **k):
+        return await self._c.count_documents(query or {}, *a, **k)
+
+    async def insert_one(self, doc, **k):
+        po_doc = order_to_po_create_payload(doc)
+        return await self._c.insert_one(po_doc, **k)
+
+    async def update_one(self, query, update, **k):
+        return await self._c.update_one(query, translate_legacy_order_update(update), **k)
+
+    async def update_many(self, query, update, **k):
+        return await self._c.update_many(query, translate_legacy_order_update(update), **k)
+
+    async def delete_one(self, query, **k):
+        return await self._c.delete_one(query, **k)
+
+
+class _MaklonOrdersCursor:
+    def __init__(self, cur):
+        self._cur = cur
+
+    def sort(self, *a, **k):
+        self._cur = self._cur.sort(*a, **k); return self
+
+    def skip(self, n):
+        self._cur = self._cur.skip(n); return self
+
+    def limit(self, n):
+        self._cur = self._cur.limit(n); return self
+
+    async def to_list(self, length=None):
+        docs = await self._cur.to_list(length=length)
+        return [po_to_legacy_order(d) for d in docs]
+
+
+def legacy_orders_view(db):
+    """Returns a legacy-shaped view of dewi_maklon_pos for P1.B back-compat."""
+    return _MaklonOrdersView(db)

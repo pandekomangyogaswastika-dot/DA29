@@ -19,6 +19,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone, date
 from database import get_db
 from auth import require_auth, serialize_doc
+from routes._maklon_adapter import legacy_orders_view as _lmo
 import uuid
 import logging
 
@@ -398,8 +399,8 @@ async def list_orders(
         query['status'] = status
     if client_id:
         query['client_id'] = client_id
-    total = await db.dewi_maklon_orders.count_documents(query)
-    orders = await db.dewi_maklon_orders.find(query, {'_id': 0}).sort('order_date', -1).skip(skip).limit(limit).to_list(500)
+    total = await _lmo(db).count_documents(query)
+    orders = await _lmo(db).find(query, {'_id': 0}).sort('order_date', -1).skip(skip).limit(limit).to_list(500)
     return {
         "total": total, "skip": skip, "limit": limit,
         "has_more": (skip + limit) < total,
@@ -410,11 +411,11 @@ async def list_orders(
 @router.get('/orders/{order_id}', deprecated=True)
 async def get_order(order_id: str, user: dict = Depends(require_auth)):
     db = get_db()
-    order = await db.dewi_maklon_orders.find_one({'id': order_id})
+    order = await _lmo(db).find_one({'id': order_id})
     if not order:
         raise HTTPException(404, 'Order tidak ditemukan')
-    order['_id'] = str(order['_id'])
-    return order
+    # Legacy wrapper already projects to legacy shape without _id
+    return serialize_doc(order)
 
 
 @router.post('/orders', deprecated=True)
@@ -423,7 +424,7 @@ async def create_order(payload: MaklonOrder, user: dict = Depends(require_auth))
     client = await db.dewi_maklon_clients.find_one({'id': payload.client_id})
     if not client:
         raise HTTPException(400, 'Client ID tidak valid')
-    existing = await db.dewi_maklon_orders.find_one({'order_code': payload.order_code})
+    existing = await _lmo(db).find_one({'order_code': payload.order_code})
     if existing:
         raise HTTPException(400, f'Order code {payload.order_code} sudah ada')
     now = _now()
@@ -438,18 +439,18 @@ async def create_order(payload: MaklonOrder, user: dict = Depends(require_auth))
     doc.setdefault('stage_qty', {})
     if doc['price_per_pcs'] > 0 and doc['qty_ordered'] > 0:
         doc['total_value'] = doc['price_per_pcs'] * doc['qty_ordered']
-    await db.dewi_maklon_orders.insert_one(doc)
+    await _lmo(db).insert_one(doc)
     return {'message': 'Order maklon berhasil dibuat', 'id': doc['id'], 'order_code': doc['order_code']}
 
 
 @router.put('/orders/{order_id}', deprecated=True)
 async def update_order(order_id: str, payload: MaklonOrder, user: dict = Depends(require_auth)):
     db = get_db()
-    existing = await db.dewi_maklon_orders.find_one({'id': order_id})
+    existing = await _lmo(db).find_one({'id': order_id})
     if not existing:
         raise HTTPException(404, 'Order tidak ditemukan')
     if payload.order_code != existing.get('order_code'):
-        conflict = await db.dewi_maklon_orders.find_one({'order_code': payload.order_code, 'id': {'$ne': order_id}})
+        conflict = await _lmo(db).find_one({'order_code': payload.order_code, 'id': {'$ne': order_id}})
         if conflict:
             raise HTTPException(400, f'Order code {payload.order_code} sudah digunakan')
     update_data = payload.dict(exclude_unset=True)
@@ -458,7 +459,7 @@ async def update_order(order_id: str, payload: MaklonOrder, user: dict = Depends
         price = update_data.get('price_per_pcs', existing.get('price_per_pcs', 0))
         qty = update_data.get('qty_ordered', existing.get('qty_ordered', 0))
         update_data['total_value'] = price * qty
-    await db.dewi_maklon_orders.update_one({'id': order_id}, {'$set': update_data})
+    await _lmo(db).update_one({'id': order_id}, {'$set': update_data})
     return {'message': 'Order berhasil diperbarui'}
 
 
@@ -470,7 +471,7 @@ async def update_order_status(
 ):
     """Update status + progress order maklon. Includes stage gate validation."""
     db = get_db()
-    order = await db.dewi_maklon_orders.find_one({'id': order_id})
+    order = await _lmo(db).find_one({'id': order_id})
     if not order:
         raise HTTPException(404, 'Order tidak ditemukan')
 
@@ -505,11 +506,11 @@ async def update_order_status(
     if new_status == 'completed' and not order.get('completion_date'):
         update_data['completion_date'] = _now().isoformat()[:10]
 
-    await db.dewi_maklon_orders.update_one({'id': order_id}, {'$set': update_data})
+    await _lmo(db).update_one({'id': order_id}, {'$set': update_data})
 
     # ── Sync linked WOs ───────────────────────────────────────────────────
     if new_status:
-        updated_order = await db.dewi_maklon_orders.find_one({'id': order_id})
+        updated_order = await _lmo(db).find_one({'id': order_id})
         if updated_order:
             await _sync_wo_status(db, updated_order, new_status, user)
 
@@ -552,7 +553,7 @@ async def update_order_status(
 async def confirm_order(order_id: str, user: dict = Depends(require_auth)):
     """Confirm order (draft → confirmed) + auto-generate linked Work Orders."""
     db = get_db()
-    order = await db.dewi_maklon_orders.find_one({'id': order_id})
+    order = await _lmo(db).find_one({'id': order_id})
     if not order:
         raise HTTPException(404, 'Order tidak ditemukan')
     if order.get('status') != 'draft':
@@ -562,7 +563,7 @@ async def confirm_order(order_id: str, user: dict = Depends(require_auth)):
     wo_ids = await _auto_generate_wos(db, order, user)
 
     now = _now()
-    await db.dewi_maklon_orders.update_one(
+    await _lmo(db).update_one(
         {'id': order_id},
         {'$set': {
             'status': 'confirmed',
@@ -591,7 +592,7 @@ async def update_stage_qty(
 ):
     """Input / update qty per tahap produksi (cutting/sewing/qc/packing)."""
     db = get_db()
-    order = await db.dewi_maklon_orders.find_one({'id': order_id})
+    order = await _lmo(db).find_one({'id': order_id})
     if not order:
         raise HTTPException(404, 'Order tidak ditemukan')
 
@@ -625,7 +626,7 @@ async def update_stage_qty(
     # Auto-calculate progress from stage qty
     progress = _calc_progress_from_stage_qty(order, stage_qty)
 
-    await db.dewi_maklon_orders.update_one(
+    await _lmo(db).update_one(
         {'id': order_id},
         {'$set': {
             'stage_qty': stage_qty,
@@ -665,10 +666,10 @@ def _calc_progress_from_stage_qty(order: dict, stage_qty: dict) -> int:
 async def get_order_production_detail(order_id: str, user: dict = Depends(require_auth)):
     """Get detail produksi: order + linked WOs + stage qty summary."""
     db = get_db()
-    order = await db.dewi_maklon_orders.find_one({'id': order_id})
+    order = await _lmo(db).find_one({'id': order_id})
     if not order:
         raise HTTPException(404, 'Order tidak ditemukan')
-    order['_id'] = str(order['_id'])
+    # Legacy wrapper already projects to legacy shape without _id
 
     linked_wo_ids = order.get('linked_wo_ids') or []
     wos = []
@@ -710,12 +711,12 @@ async def get_order_production_detail(order_id: str, user: dict = Depends(requir
 @router.delete('/orders/{order_id}', deprecated=True)
 async def cancel_order(order_id: str, user: dict = Depends(require_auth)):
     db = get_db()
-    order = await db.dewi_maklon_orders.find_one({'id': order_id})
+    order = await _lmo(db).find_one({'id': order_id})
     if not order:
         raise HTTPException(404, 'Order tidak ditemukan')
     if order.get('status') not in ['draft', 'confirmed']:
         raise HTTPException(400, 'Order yang sudah dalam produksi tidak bisa dibatalkan')
-    await db.dewi_maklon_orders.update_one(
+    await _lmo(db).update_one(
         {'id': order_id},
         {'$set': {'status': 'cancelled', 'updated_at': _now()}}
     )
@@ -742,7 +743,7 @@ async def create_material_issue(order_id: str, payload: MaklonMaterialIssueIn, u
     gudang harus melakukan Scan-Out sebelum stok benar-benar turun.
     """
     db = get_db()
-    order = await db.dewi_maklon_orders.find_one({'id': order_id})
+    order = await _lmo(db).find_one({'id': order_id})
     if not order:
         raise HTTPException(404, 'Order tidak ditemukan')
     if order.get('status') in ('draft', 'cancelled', 'invoiced'):
@@ -858,20 +859,20 @@ async def get_summary(user: dict = Depends(require_auth)):
     db = get_db()
     total_clients = await db.dewi_maklon_clients.count_documents({})
     active_clients = await db.dewi_maklon_clients.count_documents({'status': 'active'})
-    total_orders = await db.dewi_maklon_orders.count_documents({})
-    active_orders = await db.dewi_maklon_orders.count_documents({
+    total_orders = await _lmo(db).count_documents({})
+    active_orders = await _lmo(db).count_documents({
         'status': {'$nin': ['completed', 'cancelled', 'invoiced']}
     })
-    completed_orders = await db.dewi_maklon_orders.count_documents({'status': 'completed'})
-    draft_orders = await db.dewi_maklon_orders.count_documents({'status': 'draft'})
-    confirmed_orders = await db.dewi_maklon_orders.count_documents({'status': 'confirmed'})
-    in_production = await db.dewi_maklon_orders.count_documents({
+    completed_orders = await _lmo(db).count_documents({'status': 'completed'})
+    draft_orders = await _lmo(db).count_documents({'status': 'draft'})
+    confirmed_orders = await _lmo(db).count_documents({'status': 'confirmed'})
+    in_production = await _lmo(db).count_documents({
         'status': {'$in': ['material_ready', 'cutting', 'sewing', 'qc', 'packing']}
     })
     pipeline = [
         {'$group': {'_id': None, 'total_revenue': {'$sum': '$total_value'}}}
     ]
-    revenue_result = await db.dewi_maklon_orders.aggregate(pipeline).to_list(1)
+    revenue_result = await _lmo(db).aggregate(pipeline).to_list(1)
     total_revenue = revenue_result[0]['total_revenue'] if revenue_result else 0
     return {
         'total_clients': total_clients,

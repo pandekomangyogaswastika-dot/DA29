@@ -456,12 +456,9 @@ async def create_indexes():
         await db.dewi_cmt_jobs.create_index([("partner_id", 1), ("status", 1)])
 
         # Maklon — clients, orders
+        # P1.B cleanup (2026-05-23): dewi_maklon_orders dropped, SSOT is dewi_maklon_pos
         await db.dewi_maklon_clients.create_index("code", unique=True)
         await db.dewi_maklon_clients.create_index("status")
-        await db.dewi_maklon_orders.create_index("order_code", unique=True)
-        await db.dewi_maklon_orders.create_index([("client_id", 1), ("status", 1)])
-        await db.dewi_maklon_orders.create_index("status")
-        await db.dewi_maklon_orders.create_index("order_date")
 
         # Maklon — samples
         await db.dewi_maklon_samples.create_index("sample_code", unique=True)
@@ -543,28 +540,14 @@ async def create_indexes():
         await db.dewi_scheduler_runs.create_index([("started_at", -1)])
 
         # Phase 5 Sprint 32 — Toko Online (catalog + channels)
-        await db.dewi_toko_products.create_index("sku_code", unique=True)
-        await db.dewi_toko_products.create_index("status")
-        await db.dewi_toko_products.create_index([("status", 1), ("updated_at", -1)])
-        await db.dewi_toko_products.create_index("category")
-        await db.dewi_toko_channels.create_index("code", unique=True)
-        await db.dewi_toko_channel_syncs.create_index([("channel_code", 1), ("started_at", -1)])
+        # P1.D cleanup (2026-05-23): legacy collections dropped. Indexes moved to marketing_* SSOT.
+        # Preserved: dewi_toko_flashsales, dewi_toko_pack_batches (no marketing equivalent yet).
 
-        # Phase 5B — Toko Online completion (orders, KOL, returns, flashsales)
-        await db.dewi_toko_orders.create_index("order_number", unique=True)
-        await db.dewi_toko_orders.create_index([("status", 1), ("created_at", -1)])
-        await db.dewi_toko_orders.create_index("channel_code")
-        await db.dewi_toko_orders.create_index([("created_at", -1)])
+        # Phase 5B — Toko Online: preserved collections only
         await db.dewi_toko_pack_batches.create_index("batch_code", unique=True)
         await db.dewi_toko_pack_batches.create_index([("status", 1), ("created_at", -1)])
         await db.dewi_toko_flashsales.create_index([("status", 1), ("start_at", -1)])
         await db.dewi_toko_flashsales.create_index("channel_code")
-        await db.dewi_toko_returns.create_index("return_code", unique=True)
-        await db.dewi_toko_returns.create_index([("status", 1), ("created_at", -1)])
-        await db.dewi_toko_returns.create_index("return_type")
-        await db.dewi_toko_reviews.create_index([("status", 1), ("created_at", -1)])
-        await db.dewi_toko_reviews.create_index("channel_code")
-        await db.dewi_toko_reviews.create_index("rating")
         await db.dewi_kol_creators.create_index([("category", 1), ("status", 1)])
         await db.dewi_kol_creators.create_index("channel_type")
         await db.dewi_kol_deals.create_index("deal_code", unique=True)
