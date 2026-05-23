@@ -1,46 +1,34 @@
 [
   {
-    "content": "Phase 1 (POC): poc_p2p_flow.py - PASS 13/13 (create PO, approve, create GR from PO, partial receive, full receive, over-receive blocked, fully_received PO blocked, audit trail)",
+    "content": "Phase 1 (POC): poc_p2p_flow.py - PASS 13/13",
     "status": "completed"
   },
   {
-    "content": "Phase 2: POST /api/rahaza/purchase-orders/{po_id}/create-gr (auto-prefill remaining items, anti over-receive)",
+    "content": "Phase 2: POST /api/rahaza/purchase-orders/{po_id}/create-gr + GET /remaining + GET /grs",
     "status": "completed"
   },
   {
-    "content": "Phase 2b: GET /api/rahaza/purchase-orders/{po_id}/remaining (frontend pre-fill helper)",
+    "content": "Phase 3: Over-receive validation in warehouse.py update_receiving",
     "status": "completed"
   },
   {
-    "content": "Phase 2c: GET /api/rahaza/purchase-orders/{po_id}/grs (audit trail)",
+    "content": "Phase 4a: PurchaseOrderModule.jsx - createGRFromPO + GR audit trail in detail",
     "status": "completed"
   },
   {
-    "content": "Phase 3: Over-receive validation in warehouse.py update_receiving (HTTP 400 jika net > remaining)",
+    "content": "Phase 4b: ReceivingModule.jsx - 'From PO' badge + deep-link",
     "status": "completed"
   },
   {
-    "content": "Phase 3b: Also handle partially_received status transitions in update_po_received_qty",
+    "content": "Phase 4c: App.js - extend handleNavigate dengan deepLinkParams",
     "status": "completed"
   },
   {
-    "content": "Phase 4a: PurchaseOrderModule.jsx - createGRFromPO() real implementation + navigate to receiving + show GR audit trail in detail modal",
+    "content": "Phase 5: testing_agent_v3 - 23/23 PASS (100%)",
     "status": "completed"
-  },
-  {
-    "content": "Phase 4b: ReceivingModule.jsx - 'From PO' badge + deep-link open detail when navigated",
-    "status": "completed"
-  },
-  {
-    "content": "Phase 4c: App.js - extend handleNavigate to pass deepLinkParams ke module",
-    "status": "completed"
-  },
-  {
-    "content": "Phase 5: Testing dengan testing_agent_v3 - P2P flow end-to-end",
-    "status": "in_progress"
   },
   {
     "content": "Update PRD.md dan plan.md dengan progress P1.C",
-    "status": "pending"
+    "status": "completed"
   }
 ]

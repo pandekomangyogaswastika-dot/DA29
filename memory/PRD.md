@@ -11,6 +11,117 @@
 
 ---
 
+## 🆕 2026-05-23 Session — P1.C P2P Flow Completion: "Create GR from PO" (SELESAI ✅)
+
+### Goal
+Selesaikan Procure-to-Pay (P2P) flow end-to-end dengan implementasi "Create GR from PO" + anti over-receive (FORENSIC P2P gap).
+
+### Approach: Additive Backend + Frontend Wiring
+Tidak ada migrasi data dibutuhkan. P1.C purely additive:
+- 3 endpoint backend baru di `rahaza_po.py`
+- Validasi anti over-receive di `warehouse.py update_receiving`
+- Wiring frontend: PurchaseOrderModule tombol "Buat Goods Receipt" sudah berfungsi end-to-end
+
+### Files Affected
+- **UPDATED**: `/app/backend/routes/rahaza_po.py`
+  - Tambah helper `compute_po_remaining()`
+  - Tambah endpoint `GET /api/rahaza/purchase-orders/{po_id}/remaining`
+  - Tambah endpoint `POST /api/rahaza/purchase-orders/{po_id}/create-gr`
+  - Tambah endpoint `GET /api/rahaza/purchase-orders/{po_id}/grs`
+  - Fix `update_po_received_qty()` agar bisa transisi `partially_received` → `fully_received`
+- **UPDATED**: `/app/backend/routes/warehouse.py`
+  - Tambah validasi anti over-receive di `update_receiving` (saat status='received' dengan po_id + enforce_po_qty)
+- **NEW**: `/app/backend/migrations/poc_p2p_flow.py` (POC 13 user stories)
+- **UPDATED**: `/app/frontend/src/components/erp/PurchaseOrderModule.jsx`
+  - Implementasi nyata `createGRFromPO()` (call backend + redirect)
+  - Fetch + tampilkan GR audit trail di PO detail modal
+- **UPDATED**: `/app/frontend/src/components/erp/ReceivingModule.jsx`
+  - Badge "Dari PO {po_number}" pada list GR
+  - Deep-link buka detail GR otomatis setelah create-from-PO
+- **UPDATED**: `/app/frontend/src/App.js`
+  - Extend `handleNavigate` agar bisa pass `deepLinkParams` ke module
+
+### Endpoints Spec
+```
+GET  /api/rahaza/purchase-orders/{po_id}/remaining
+  → { po_id, po_number, vendor_name, status,
+      items_remaining: [{po_item_id, material_id, material_name, unit,
+                          qty_ordered, qty_received, qty_remaining, unit_cost}],
+      total_remaining: float }
+
+POST /api/rahaza/purchase-orders/{po_id}/create-gr
+  Body: { location_id?, location_name?, notes?, items_override?: [{po_item_id, qty}] }
+  → Buat draft GR di warehouse_receiving dengan:
+    - status='draft', enforce_po_qty=true
+    - po_id, po_number, supplier_name=vendor_name
+    - items[*].expected_qty = qty_remaining (or override)
+    - items[*].material_id terisi
+  Validasi:
+    - PO status harus ∈ {approved, partially_received}
+    - total_remaining > 0
+  Returns: full GR doc
+
+GET  /api/rahaza/purchase-orders/{po_id}/grs
+  → [{id, receipt_number, status, created_at, received_by, location_name,
+      items_count, total_expected, total_received, total_rejected,
+      total_net, enforce_po_qty}]
+```
+
+### Anti Over-Receive Logic
+Saat `PUT /api/wms/legacy/receiving/{id}` mengubah status menjadi `received`:
+1. Cek apakah GR punya `po_id` dan `enforce_po_qty=true`
+2. Load PO, hitung remaining per material_id
+3. Sum net_qty (received - rejected) per material_id di GR
+4. Jika net > remaining → **HTTP 400** dengan pesan: "Over-receive ditolak untuk {material}: net qty {X} melebihi sisa PO {Y} (PO {po_number})."
+
+### POC Results
+`/app/backend/migrations/poc_p2p_flow.py` — **PASS 13/13** ✅
+
+User stories tested:
+1. ✅ Create PO with 3 items
+2. ✅ Submit + Approve PO
+3. ✅ GET /remaining endpoint
+4. ✅ Create GR from PO (auto-prefill)
+5. ✅ Receive half (partial)
+6. ✅ PO status → partially_received
+7. ✅ rahaza_material_stock synced
+8. ✅ Create 2nd GR (remaining qty only)
+9. ✅ Over-receive rejected (HTTP 400)
+10. ✅ Normal receive completes PO
+11. ✅ PO status → fully_received
+12. ✅ Cannot create GR from fully_received PO (HTTP 400)
+13. ✅ GET /grs audit trail (2 GRs)
+
+### Testing Results (testing_agent_v3 iteration_17)
+- **23/23 backend tests PASS (100%)** ✅
+- Verified all 3 new endpoints + anti over-receive validation + end-to-end flow
+- Verified status transitions, qty_received sync, stock sync, audit trail
+- No critical bugs, no flaky endpoints
+
+### Decisions Made
+- GR endpoint URL = `/api/wms/legacy/receiving/*` (bukan deprecated `/api/warehouse/*`)
+- `enforce_po_qty` flag default true jika ada `po_id` (anti over-receive)
+- Frontend deep-link via `App.handleNavigate(moduleId, params)` + module accepts `deepLinkParams` prop
+- Tidak ada migrasi data (P1.C additive)
+
+### Tech Debt Addressed
+- [DONE] Procure-to-Pay flow end-to-end (PR → PO → GR → AP siap untuk Phase 4)
+- [DONE] Anti over-receive validation
+- [DONE] Audit trail PO → GR
+- [DONE] Fix transisi status `partially_received` → `fully_received` (sebelumnya hanya transisi dari `approved`)
+- [REMAINING] AP Invoice generation from GR (Phase 4 future)
+- [REMAINING] 3-way match dashboard (Phase 4 future)
+
+### Next Action Items
+1. **P1.D Legacy Toko Migration** (~18 jam) — 8 koleksi `dewi_toko_*` → `marketing_*`
+2. **Cleanup P1.A + P1.B + P1.C** (setelah monitoring 1 minggu)
+3. **3-way match dashboard** — visualisasi PO ↔ GR ↔ AP
+4. **AP Invoice auto-generate dari GR** (matching qty + harga vendor)
+
+
+
+---
+
 ## 🆕 2026-05-23 Session — P1.B Maklon Orders Consolidation (SELESAI ✅)
 
 ### Goal
