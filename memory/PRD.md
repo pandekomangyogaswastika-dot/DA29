@@ -11,6 +11,94 @@
 
 ---
 
+## 🆕 2026-05-23 Session — P1.B Maklon Orders Consolidation (SELESAI ✅)
+
+### Goal
+Deprecate `dewi_maklon_orders` (legacy, single-product per order) → use `dewi_maklon_pos` (multi-item PO) sebagai SSOT untuk semua data order maklon (FORENSIC_04 Cluster 2).
+
+### Approach: API-Stable Deprecation + Adapter Pattern
+1. **Legacy endpoints kept** for backward compatibility (12 endpoints `/api/dewi/maklon/orders/*`), tapi semua sudah ditandai `deprecated=True` di FastAPI / OpenAPI.
+2. **Adapter pattern**: `/app/backend/routes/_maklon_adapter.py` menyediakan konversi dua arah:
+   - `po_to_legacy_order(po_doc)` — proyeksi PO ke legacy order shape (untuk client portal)
+   - `order_to_po_create_payload(order_doc)` — konversi legacy order ke PO insert payload (untuk migration)
+   - `find_maklon_record(db, id)` — lookup by id di kedua koleksi (preferred: `dewi_maklon_pos`)
+3. **Consumers refactored** untuk membaca dari `dewi_maklon_pos`:
+   - `dewi_client_portal.py` (dashboard, orders list, order detail, qc, samples)
+   - `dewi_management_tools.py` (weekly-digest)
+   - `dewi_maklon_billing.py` (generate-invoice, hpp, cancel-invoice)
+   - `dewi_maklon_samples.py` (create-sample, with po_id traceability)
+
+### Files Affected
+- **NEW**: `/app/backend/routes/_maklon_adapter.py` (262 lines)
+- **NEW**: `/app/backend/migrations/poc_maklon_consolidation.py`
+- **NEW**: `/app/backend/migrations/migrate_maklon_orders.py`
+- **UPDATED**: `/app/backend/routes/dewi_maklon.py` (12 orders endpoints marked `deprecated=True`)
+- **UPDATED**: `/app/backend/routes/dewi_client_portal.py` (dashboard + 4 orders endpoints refactored)
+- **UPDATED**: `/app/backend/routes/dewi_management_tools.py` (maklon counts)
+- **UPDATED**: `/app/backend/routes/dewi_maklon_billing.py` (3 endpoints use find_maklon_record)
+- **UPDATED**: `/app/backend/routes/dewi_maklon_samples.py` (create_sample uses find_maklon_record)
+
+### Status Mapping (PO → Legacy)
+| PO Status | Legacy Status |
+|---|---|
+| draft | draft |
+| confirmed | confirmed |
+| in_production | cutting (default), 'packing' if any dispatched |
+| partial_delivered | packing |
+| completed | completed |
+| invoiced | invoiced |
+| cancelled | cancelled |
+
+### Migration Results (executed 2026-05-23)
+- 3 legacy `dewi_maklon_orders` → migrated to `dewi_maklon_pos`:
+  - MKLO-LEG-001 (Dress Wanita, sewing→in_production, 200 pcs, 3 items by size S/M/L) ✅
+  - MKLO-LEG-002 (Kemeja Pria, completed, 100 pcs, 1 item) ✅
+  - MKLO-LEG-003 (Jaket Bomber, draft, 50 pcs, 1 item) ✅
+- Legacy collection NOT dropped (preserved 1 week per protocol)
+- All POs have `migrated_from='dewi_maklon_orders'` + `legacy_order_id` for traceability
+- Re-run idempotent: skips existing POs
+
+### Testing Results (testing_agent_v3 iteration_16)
+- **13/14 backend tests PASS (92.9%)** — semua critical tests passed
+- Tested flows:
+  - PO CRUD (create/list/get/status update/confirm)
+  - Migration idempotency ✅
+  - Legacy backward compat (`/api/dewi/maklon/orders` still returns 200) ✅
+  - Sample creation with po_id traceability ✅
+  - Invoice generation for migrated PO (status → invoiced, ar_invoice_id populated) ✅
+  - HPP creation reading current_price from migrated PO ✅
+  - Management weekly-digest reads from `dewi_maklon_pos` ✅
+- 1 minor non-blocking: `/openapi.json` testing — fixed: agent was hitting wrong URL, actual endpoint is `/api/openapi.json` and ALL 12 legacy endpoints correctly show `deprecated=True`.
+
+### Verifikasi OpenAPI
+```bash
+curl -s http://localhost:8001/api/openapi.json | jq '.paths | with_entries(select(.key | startswith("/api/dewi/maklon/orders"))) | map_values(map_values(.deprecated))'
+# Returns: 12/12 endpoints flagged deprecated=true
+```
+
+### Decisions Made
+- SSOT untuk maklon orders = `dewi_maklon_pos` (multi-item)
+- Legacy `dewi_maklon_orders` collection PRESERVED, NOT dropped (1-week monitoring)
+- Legacy endpoints PRESERVED, marked deprecated (for any external integrations / monitoring)
+- Adapter pattern preferred over hard cutover (zero-risk for client portal)
+- Sample docs now have BOTH `order_id` AND `po_id` (transitional)
+
+### Tech Debt Addressed
+- [DONE] Stop dual-write to two SSOTs
+- [DONE] All dashboard counts unified to `dewi_maklon_pos`
+- [REMAINING] After 1-week monitoring: drop `dewi_maklon_orders` collection + remove deprecated routes from `dewi_maklon.py` (~ 600 lines)
+- [REMAINING] Frontend MaklonOrderModule.jsx still exists (already overridden by `maklon-orders → maklon-po` redirect in moduleRegistry, but file can be deleted)
+
+### Next Action Items (Recommended)
+1. **P1.C P2P Flow Completion** (~14 jam) — implement "Create GR from PO" 
+2. **P1.D Legacy Toko Migration** (~18 jam) — 8 koleksi `dewi_toko_*` → `marketing_*`
+3. **Cleanup P1.A + P1.B** (setelah 1 minggu): drop legacy collections + delete deprecated routes
+4. **acc_opname → wh_opname2 migration** (FORENSIC_04 Cluster B)
+
+
+
+---
+
 ## 🆕 2026-05-22 Session — P1.A Accessory Consolidation (SELESAI ✅)
 
 ### Goal
