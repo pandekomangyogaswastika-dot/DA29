@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
 import { PageHeader } from './moduleAtoms';
+import { fetchMaklonOrders, posToLegacyOrders } from '@/lib/maklonOrderAdapter';
 
 const STATUS_CONFIG = {
   draft:        { label: 'Draft',        color: 'bg-slate-500/15 text-slate-300 border-slate-400/30' },
@@ -46,13 +47,13 @@ export default function MaklonBillingModule({ token }) {
     try {
       const [inv, ord, sum, ag] = await Promise.all([
         fetch('/api/dewi/maklon/invoices', { headers }),
-        fetch('/api/dewi/maklon/orders', { headers }),
+        fetch('/api/dewi/maklon/pos', { headers }),
         fetch('/api/dewi/maklon/reports/billing-summary', { headers }),
         fetch('/api/dewi/maklon/reports/aging', { headers }),
       ]);
       if (inv.ok) setInvoices(await inv.json());
       if (ord.ok) {
-        const allOrders = await ord.json();
+        const allOrders = posToLegacyOrders(await ord.json());
         // Orders that can be invoiced: not draft/cancelled, not already invoiced (we verify via invoices list)
         const invoicedOrderIds = new Set((await (await fetch('/api/dewi/maklon/invoices', { headers })).json() || [])
           .filter(x => x.status !== 'cancelled').map(x => x.order_id));

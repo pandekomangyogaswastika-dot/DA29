@@ -10,6 +10,7 @@ import { PageHeader } from './moduleAtoms';
 import { HppComparisonInline } from './HppComparisonInline';
 import { ExportButtonGroup } from './ExportButtonGroup';
 import { toast } from 'sonner';
+import { fetchMaklonOrders, posToLegacyOrders } from '@/lib/maklonOrderAdapter';
 
 const fmt = (n) => `Rp ${Number(n || 0).toLocaleString('id-ID')}`;
 
@@ -362,9 +363,9 @@ function MaklonActualTab({ token, headers }) {
   useEffect(() => {
     const fetchOrders = async () => {
       try {
-        const r = await fetch('/api/dewi/maklon/orders', { headers });
+        const r = await fetch('/api/dewi/maklon/pos', { headers });
         if (r.ok) {
-          const data = await r.json();
+          const data = posToLegacyOrders(await r.json());
           setOrders(data.filter(o => !['draft', 'cancelled'].includes(o.status)));
         }
       } catch (e) {

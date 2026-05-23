@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
 import { PageHeader } from './moduleAtoms';
+import { posToLegacyOrders } from '@/lib/maklonOrderAdapter';
 
 const PRODUCT_CATEGORIES = ['Rok', 'Blouse', 'Dress', 'Celana', 'Set/Setelan', 'Baju Anak', 'Hijab', 'Aksesoris', 'Lainnya'];
 
@@ -46,10 +47,10 @@ export default function MaklonOrderModule({ token }) {
     setLoading(true);
     try {
       const [ordersR, clientsR] = await Promise.all([
-        fetch('/api/dewi/maklon/orders', { headers }),
+        fetch('/api/dewi/maklon/pos', { headers }),
         fetch('/api/dewi/maklon/clients?status=active', { headers }),
       ]);
-      if (ordersR.ok) setOrders(await ordersR.json());
+      if (ordersR.ok) setOrders(posToLegacyOrders(await ordersR.json()));
       if (clientsR.ok) setClients(await clientsR.json());
     } catch(e) { toast.error('Gagal memuat data order'); }
     finally { setLoading(false); }
@@ -58,14 +59,18 @@ export default function MaklonOrderModule({ token }) {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const confirmOrder = async (order) => {
-    const r = await fetch(`/api/dewi/maklon/orders/${order.id}/confirm`, { method: 'PUT', headers });
+    const r = await fetch(`/api/dewi/maklon/pos/${order.id}/confirm`, { method: 'POST', headers });
     if (r.ok) { toast.success(`Order ${order.order_code} dikonfirmasi`); fetchData(); }
     else { const e = await r.json(); toast.error(e.detail || 'Gagal konfirmasi'); }
   };
 
   const cancelOrder = async (order) => {
     if (!window.confirm(`Batalkan order ${order.order_code}?`)) return;
-    const r = await fetch(`/api/dewi/maklon/orders/${order.id}`, { method: 'DELETE', headers });
+    const r = await fetch(`/api/dewi/maklon/pos/${order.id}/cancel`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ reason: 'Cancelled via maklon orders module' }),
+    });
     if (r.ok) { toast.success('Order dibatalkan'); fetchData(); }
     else toast.error('Gagal membatalkan order');
   };

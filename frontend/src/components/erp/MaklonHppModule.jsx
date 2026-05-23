@@ -9,6 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
 import { PageHeader } from './moduleAtoms';
+import { fetchMaklonOrders } from '@/lib/maklonOrderAdapter';
 
 const CATEGORIES = [
   { value: 'material',  label: 'Material/Kain' },
@@ -37,8 +38,9 @@ export default function MaklonHppModule({ token }) {
   const fetchOrders = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch('/api/dewi/maklon/orders', { headers });
-      if (r.ok) setOrders((await r.json()).filter(o => !['draft','cancelled'].includes(o.status)));
+      // P1.B cutover: read from /api/dewi/maklon/pos via adapter
+      const allOrders = await fetchMaklonOrders(headers);
+      setOrders(allOrders.filter(o => !['draft','cancelled'].includes(o.status)));
     } catch (e) { toast.error('Gagal memuat order'); }
     finally { setLoading(false); }
   }, [headers]);

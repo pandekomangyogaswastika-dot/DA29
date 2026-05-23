@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { PageHeader } from './moduleAtoms';
+import { fetchMaklonOrders } from '@/lib/maklonOrderAdapter';
 import MaklonMaterialIssuePanel from './MaklonMaterialIssuePanel';
 
 // ─── STAGE CONFIG ────────────────────────────────────────────────────────────
@@ -276,8 +277,10 @@ export default function MaklonProductionTracking({ token }) {
   const fetchOrders = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch('/api/dewi/maklon/orders', { headers });
-      if (r.ok) setOrders((await r.json()).filter(o => !['cancelled', 'draft'].includes(o.status)));
+      // P1.B cutover: list from /pos via adapter; detail/stage-qty/status stay on legacy /orders
+      // because PO doesn't have the stage_qty workflow that this tracker uses.
+      const all = await fetchMaklonOrders(headers);
+      setOrders(all.filter(o => !['cancelled', 'draft'].includes(o.status)));
     } catch (e) { toast.error('Gagal memuat order'); }
     finally { setLoading(false); }
   }, [headers]);
@@ -303,17 +306,14 @@ export default function MaklonProductionTracking({ token }) {
 
   const refreshDetail = useCallback(async () => {
     if (!selectedOrder) return;
-    // Re-fetch both list and detail
-    const [ordersR, prodR] = await Promise.all([
-      fetch('/api/dewi/maklon/orders', { headers }),
+    // Re-fetch both list (from /pos) and detail (still legacy because stage_qty workflow)
+    const [allOrders, prodR] = await Promise.all([
+      fetchMaklonOrders(headers),
       fetch(`/api/dewi/maklon/orders/${selectedOrder.id}/production-detail`, { headers }),
     ]);
-    if (ordersR.ok) {
-      const all = await ordersR.json();
-      setOrders(all.filter(o => !['cancelled', 'draft'].includes(o.status)));
-      const updated = all.find(o => o.id === selectedOrder.id);
-      if (updated) setSelectedOrder(updated);
-    }
+    setOrders(allOrders.filter(o => !['cancelled', 'draft'].includes(o.status)));
+    const updated = allOrders.find(o => o.id === selectedOrder.id);
+    if (updated) setSelectedOrder(updated);
     if (prodR.ok) setProdDetail(await prodR.json());
   }, [headers, selectedOrder]);
 

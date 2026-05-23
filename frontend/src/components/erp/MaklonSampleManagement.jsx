@@ -12,6 +12,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
 import { PageHeader } from './moduleAtoms';
+import { fetchMaklonOrders, posToLegacyOrders } from '@/lib/maklonOrderAdapter';
 
 const STATUS_CONFIG = {
   draft:               { label: 'Draft',             color: 'bg-slate-500/15 text-slate-300 border-slate-400/30' },
@@ -45,11 +46,11 @@ export default function MaklonSampleManagement({ token }) {
     try {
       const [s, o, sum] = await Promise.all([
         fetch('/api/dewi/maklon/samples', { headers }),
-        fetch('/api/dewi/maklon/orders', { headers }),
+        fetch('/api/dewi/maklon/pos', { headers }),
         fetch('/api/dewi/maklon/samples/summary/overview', { headers }),
       ]);
       if (s.ok) setSamples(await s.json());
-      if (o.ok) setOrders(await o.json());
+      if (o.ok) setOrders(posToLegacyOrders(await o.json()));
       if (sum.ok) setSummary(await sum.json());
     } catch (e) { toast.error('Gagal memuat data sample'); }
     finally { setLoading(false); }

@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 import { PageHeader } from './moduleAtoms';
+import { fetchMaklonOrders, posToLegacyOrders } from '@/lib/maklonOrderAdapter';
 
 export default function MaklonDashboard({ token, onNavigate }) {
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }), [token]);
@@ -19,13 +20,11 @@ export default function MaklonDashboard({ token, onNavigate }) {
     try {
       const [sumR, ordersR] = await Promise.all([
         fetch('/api/dewi/maklon/summary', { headers }),
-        fetch('/api/dewi/maklon/orders', { headers }),
+        fetch('/api/dewi/maklon/pos', { headers }),
       ]);
       if (sumR.ok) setSummary(await sumR.json());
       if (ordersR.ok) {
-        const orders = await ordersR.json();
-        // API returns paginated {items: [], total, skip, limit, has_more}
-        const orderList = Array.isArray(orders) ? orders : (orders.items || []);
+        const orderList = posToLegacyOrders(await ordersR.json());
         setRecentOrders(orderList.slice(0, 10));
       }
     } catch (e) {

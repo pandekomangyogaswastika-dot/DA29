@@ -12,6 +12,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
 import { PageHeader } from './moduleAtoms';
+import { fetchMaklonOrders, posToLegacyOrders } from '@/lib/maklonOrderAdapter';
 
 const STAGES = [
   { value: 'raw_material', label: 'Raw Material' },
@@ -51,12 +52,12 @@ export default function MaklonQCTracking({ token }) {
     try {
       const [c, o, s, p] = await Promise.all([
         fetch('/api/dewi/maklon/qc', { headers }),
-        fetch('/api/dewi/maklon/orders', { headers }),
+        fetch('/api/dewi/maklon/pos', { headers }),
         fetch('/api/dewi/maklon/qc/summary/overview', { headers }),
         fetch('/api/dewi/maklon/qc/defect-pareto', { headers }),
       ]);
       if (c.ok) setChecks(await c.json());
-      if (o.ok) setOrders(await o.json());
+      if (o.ok) setOrders(posToLegacyOrders(await o.json()));
       if (s.ok) setSummary(await s.json());
       if (p.ok) { const d = await p.json(); setPareto(d.items || []); }
     } catch (e) { toast.error('Gagal memuat QC'); }
