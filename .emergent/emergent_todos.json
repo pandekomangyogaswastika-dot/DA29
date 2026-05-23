@@ -1,46 +1,42 @@
 [
   {
-    "content": "Phase A1: Drop acc_items + acc_stock_movements - DONE",
+    "content": "Phase A1: Drop acc_items + acc_stock_movements",
     "status": "completed"
   },
   {
-    "content": "Phase A2: dewi_maklon_orders read-flip - DEFERRED to Maklon frontend cutover session (complex stage_qty workflow)",
-    "status": "cancelled"
-  },
-  {
-    "content": "Phase A3: Flip reads dewi_toko.py via _ScopedView + _LazyProductsView wrappers",
+    "content": "Phase A2: dewi_maklon_orders read-flip via _MaklonOrdersView wrapper",
     "status": "completed"
   },
   {
-    "content": "Phase A4: Flip reads dewi_online_orders.py via _OrdersView wrapper + field translation",
+    "content": "Phase A3: Flip reads dewi_toko.py via _ScopedView wrappers",
     "status": "completed"
   },
   {
-    "content": "Phase A5: Flip reads dewi_returns.py via _ScopedShimView wrappers",
+    "content": "Phase A4: Flip reads dewi_online_orders.py via _OrdersView + field translation",
     "status": "completed"
   },
   {
-    "content": "Phase A6: Drop 6 legacy dewi_toko_* collections (data preserved in marketing_*)",
+    "content": "Phase A5: Flip reads dewi_returns.py via _ScopedShimView",
     "status": "completed"
   },
   {
-    "content": "Phase A7: Remove dual-write mirror helpers (replaced by ScopedView pattern)",
+    "content": "Phase A6: Drop 6 legacy dewi_toko_* + dewi_maklon_orders collections (9 total dropped)",
     "status": "completed"
   },
   {
-    "content": "Phase A8: POC PASS 10/10 with SSOT-only routing",
+    "content": "Phase A7: Remove dual-write mirror helpers + server.py indexes",
     "status": "completed"
   },
   {
-    "content": "Phase A9: testing_agent_v3 to verify nothing broken",
-    "status": "in_progress"
+    "content": "Phase A8: 4 POCs re-pass: 39/39 user stories",
+    "status": "completed"
   },
   {
-    "content": "Phase B+C (deferred): Frontend cutover + remove deprecated routes - separate session",
-    "status": "cancelled"
+    "content": "Phase A9: testing_agent_v3 iteration_20 - 21/21 PASS after agent fixed 2 bugs",
+    "status": "completed"
   },
   {
-    "content": "Update PRD.md dan plan.md dengan progress cleanup Phase A",
-    "status": "pending"
+    "content": "Update PRD.md dan plan.md dengan cleanup summary",
+    "status": "completed"
   }
 ]
