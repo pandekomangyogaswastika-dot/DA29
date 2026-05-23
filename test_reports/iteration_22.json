@@ -1,0 +1,110 @@
+{
+  "summary": "Phase C Maklon Route Removal testing completed successfully. All 6 legacy endpoints removed (GET/POST/PUT/DELETE /orders), 6 retained endpoints working (stage_qty workflow + material-issues), new SSOT endpoints functional, OpenAPI verification passed (5 paths with 6 methods), and all POC migration scripts passed with no regression.",
+  "backend_issues": {
+    "critical_bugs": [],
+    "flaky_endpoints": [],
+    "notes": "No backend issues found. All endpoints behaving as expected."
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "notes": "Frontend testing not required (backend only testing as per task)"
+  },
+  "passed_tests": [
+    "Admin login successful",
+    "GET /api/dewi/maklon/orders — correctly removed (404)",
+    "GET /api/dewi/maklon/orders/{id} — correctly removed (404)",
+    "POST /api/dewi/maklon/orders — correctly removed (404)",
+    "PUT /api/dewi/maklon/orders/{id} — correctly removed (404)",
+    "PUT /api/dewi/maklon/orders/{id}/confirm — correctly removed (404)",
+    "DELETE /api/dewi/maklon/orders/{id} — correctly removed (404)",
+    "GET /api/dewi/maklon/pos — verified MKLO-LEG-001/002/003 exist",
+    "PUT /api/dewi/maklon/orders/{id}/status — retained endpoint works",
+    "PUT /api/dewi/maklon/orders/{id}/stage-qty — retained endpoint works",
+    "GET /api/dewi/maklon/orders/{id}/production-detail — retained endpoint works",
+    "GET /api/dewi/maklon/orders/{id}/material-issues — retained endpoint works",
+    "POST /api/dewi/maklon/pos — SSOT endpoint works (PO creation)",
+    "POST /api/dewi/maklon/pos/{id}/confirm — SSOT endpoint works (PO confirmation)",
+    "POST /api/dewi/maklon/pos/{id}/cancel — SSOT endpoint works (PO cancellation)",
+    "GET /openapi.json — verified 5 paths with 6 methods for /api/dewi/maklon/orders/*",
+    "GET /api/dewi/maklon/clients — verified untouched",
+    "POC Maklon Consolidation script — 6/6 tests passed",
+    "POC P2P Flow script — 13/13 tests passed",
+    "POC Accessory SSOT script — 10/10 tests passed",
+    "POC Toko Consolidation script — 10/10 tests passed"
+  ],
+  "test_report_links": [
+    "/app/backend/backend_test_phase_c.py"
+  ],
+  "action_item_for_main_agent": "",
+  "updated_files": [
+    "/app/backend/backend_test_phase_c.py"
+  ],
+  "success_percentage": {
+    "backend": "100% (18/18 API tests + 4/4 POC scripts)",
+    "frontend": "N/A (not tested as per task requirements)"
+  },
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_test_itself": false,
+  "detailed_results": {
+    "removed_endpoints": {
+      "count": 6,
+      "status": "All correctly return 404",
+      "endpoints": [
+        "GET /api/dewi/maklon/orders",
+        "GET /api/dewi/maklon/orders/{id}",
+        "POST /api/dewi/maklon/orders",
+        "PUT /api/dewi/maklon/orders/{id}",
+        "PUT /api/dewi/maklon/orders/{id}/confirm",
+        "DELETE /api/dewi/maklon/orders/{id}"
+      ]
+    },
+    "retained_endpoints": {
+      "count": 6,
+      "status": "All working correctly",
+      "endpoints": [
+        "PUT /api/dewi/maklon/orders/{order_id}/status",
+        "PUT /api/dewi/maklon/orders/{order_id}/stage-qty",
+        "GET /api/dewi/maklon/orders/{order_id}/production-detail",
+        "POST /api/dewi/maklon/orders/{order_id}/material-issues",
+        "GET /api/dewi/maklon/orders/{order_id}/material-issues",
+        "DELETE /api/dewi/maklon/orders/{order_id}/material-issues/{issue_id}"
+      ]
+    },
+    "new_ssot_endpoints": {
+      "count": 3,
+      "status": "All working correctly",
+      "endpoints": [
+        "POST /api/dewi/maklon/pos",
+        "POST /api/dewi/maklon/pos/{id}/confirm",
+        "POST /api/dewi/maklon/pos/{id}/cancel"
+      ]
+    },
+    "openapi_verification": {
+      "status": "PASS",
+      "paths_count": 5,
+      "methods_count": 6,
+      "note": "5 unique paths with 6 HTTP methods total (as expected)"
+    },
+    "poc_scripts": {
+      "poc_maklon_consolidation": "6/6 PASS",
+      "poc_p2p_flow": "13/13 PASS",
+      "poc_accessory_ssot": "10/10 PASS",
+      "poc_toko_consolidation": "10/10 PASS"
+    },
+    "migrated_data": {
+      "status": "Verified",
+      "migrated_pos": [
+        "MKLO-LEG-001",
+        "MKLO-LEG-002",
+        "MKLO-LEG-003"
+      ]
+    },
+    "loc_reduction": {
+      "backend": "196 LOC",
+      "frontend": "294 LOC (MaklonOrderModule.jsx deleted)",
+      "total": "490 LOC"
+    }
+  }
+}

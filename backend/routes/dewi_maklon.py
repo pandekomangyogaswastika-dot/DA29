@@ -98,39 +98,10 @@ class MaklonClient(BaseModel):
     created_by: Optional[str] = None
 
 
-class MaklonOrder(BaseModel):
-    id: Optional[str] = None
-    order_code: str = Field(...)
-    client_id: str
-    client_name: Optional[str] = None
-    product_name: str = Field(...)
-    product_category: str = Field(default="Baju Wanita")
-    qty_ordered: int = Field(..., ge=1)
-    qty_per_size: List[Dict[str, Any]] = Field(default_factory=list)
-    colors: List[str] = Field(default_factory=list)
-    price_per_pcs: float = Field(default=0)
-    total_value: float = Field(default=0)
-    order_date: str = Field(...)
-    deadline_date: str = Field(...)
-    completion_date: Optional[str] = None
-    status: str = Field(default="draft")
-    progress_percentage: int = Field(default=0, ge=0, le=100)
-    fabric_provided_by: str = Field(default="client")
-    material_notes: Optional[str] = None
-    wo_ids: List[str] = Field(default_factory=list)
-    cmt_job_ids: List[str] = Field(default_factory=list)
-    delivery_method: str = Field(default="pickup")
-    delivery_address: Optional[str] = None
-    revision_count: int = Field(default=0)
-    notes: Optional[str] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    created_by: Optional[str] = None
-    confirmed_by: Optional[str] = None
-    # Phase 6 fields
-    linked_wo_ids: List[str] = Field(default_factory=list)
-    sync_mode: str = Field(default="manual")      # manual | wo
-    stage_qty: Dict[str, Any] = Field(default_factory=dict)
+class _DeprecatedMaklonOrderInputModel(BaseModel):
+    """Placeholder — Phase C cleanup removed the legacy POST/PUT /orders endpoints.
+    Order create/update now happens at /api/dewi/maklon/pos.
+    """
 
 
 class OrderStatusIn(BaseModel):
@@ -229,72 +200,14 @@ async def _validate_stage_gate(order: dict, new_stage: str, force: bool = False)
     return None
 
 
-async def _auto_generate_wos(db, order: dict, user: dict) -> List[str]:
-    """
-    Auto-generate Work Orders dari Maklon Order yang dikonfirmasi.
-    Returns list of WO IDs yang dibuat.
-    """
-    wo_ids = []
-    qty_per_size = order.get('qty_per_size') or []
 
-    if qty_per_size:
-        # Buat 1 WO per ukuran
-        for sz_item in qty_per_size:
-            size_label = sz_item.get('size', 'All')
-            qty = int(sz_item.get('qty', 0))
-            if qty <= 0:
-                continue
-            wo_doc = await _build_maklon_wo(db, order, qty=qty, size_label=size_label, user=user)
-            await db.rahaza_work_orders.insert_one(wo_doc)
-            wo_ids.append(wo_doc['id'])
-            logger.info(f"[auto_wo] Created WO {wo_doc['wo_number']} for maklon {order['order_code']} size={size_label}")
-    else:
-        # Buat 1 WO untuk keseluruhan order
-        wo_doc = await _build_maklon_wo(db, order, qty=int(order.get('qty_ordered', 0)), size_label='All', user=user)
-        await db.rahaza_work_orders.insert_one(wo_doc)
-        wo_ids.append(wo_doc['id'])
-        logger.info(f"[auto_wo] Created WO {wo_doc['wo_number']} for maklon {order['order_code']}")
-
-    return wo_ids
-
-
-async def _build_maklon_wo(db, order: dict, qty: int, size_label: str, user: dict) -> dict:
-    """Build WO document untuk order maklon."""
-    now = _now()
-    wo_number = await _gen_wo_number(db)
-    return {
-        'id': _uid(),
-        'wo_number': wo_number,
-        # Maklon source
-        'source': 'maklon',
-        'maklon_order_id': order['id'],
-        'maklon_order_code': order.get('order_code', ''),
-        'client_name': order.get('client_name', ''),
-        'product_name_snapshot': order.get('product_name', ''),
-        'size_label': size_label,
-        # Internal refs (nullable untuk maklon)
-        'order_id': None,
-        'order_number_snapshot': order.get('order_code', ''),
-        'order_item_id': None,
-        'model_id': None,
-        'size_id': None,
-        # Qty & specs
-        'qty': qty,
-        'customer_snapshot': order.get('client_name', ''),
-        'is_internal': False,
-        'priority': 'normal',
-        'target_start_date': None,
-        'target_end_date': order.get('deadline_date'),
-        # No BOM for maklon (fabric from client or manual material)
-        'bom_snapshot': None,
-        # Status
-        'status': 'draft',
-        'notes': f"Auto-generated dari Maklon Order {order.get('order_code')}",
-        'created_by': user['id'],
-        'created_by_name': user.get('name', ''),
-        'created_at': now,
-        'updated_at': now,
-    }
+# ──────────────────────────────────────────────────────────────────────────────
+# Phase C cleanup (2026-05-23): Removed unused legacy helpers:
+#   - _auto_generate_wos() — was only called by removed confirm_order endpoint
+#   - _build_maklon_wo()   — was only called by _auto_generate_wos
+# Auto-WO generation now happens at POST /api/dewi/maklon/pos/{po_id}/confirm
+# in dewi_maklon_pos.py (multi-item PO model with native WO generation per item).
+# ──────────────────────────────────────────────────────────────────────────────
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -385,82 +298,24 @@ async def toggle_client_status(client_id: str, user: dict = Depends(require_auth
 # ORDER MANAGEMENT
 # ══════════════════════════════════════════════════════════════════════════════
 
-@router.get('/orders', deprecated=True)
-async def list_orders(
-    status: Optional[str] = None,
-    client_id: Optional[str] = None,
-    skip: int = 0,
-    limit: int = 30,
-    user: dict = Depends(require_auth)
-):
-    db = get_db()
-    query = {}
-    if status:
-        query['status'] = status
-    if client_id:
-        query['client_id'] = client_id
-    total = await _lmo(db).count_documents(query)
-    orders = await _lmo(db).find(query, {'_id': 0}).sort('order_date', -1).skip(skip).limit(limit).to_list(500)
-    return {
-        "total": total, "skip": skip, "limit": limit,
-        "has_more": (skip + limit) < total,
-        "items": serialize_doc(orders),
-    }
-
-
-@router.get('/orders/{order_id}', deprecated=True)
-async def get_order(order_id: str, user: dict = Depends(require_auth)):
-    db = get_db()
-    order = await _lmo(db).find_one({'id': order_id})
-    if not order:
-        raise HTTPException(404, 'Order tidak ditemukan')
-    # Legacy wrapper already projects to legacy shape without _id
-    return serialize_doc(order)
-
-
-@router.post('/orders', deprecated=True)
-async def create_order(payload: MaklonOrder, user: dict = Depends(require_auth)):
-    db = get_db()
-    client = await db.dewi_maklon_clients.find_one({'id': payload.client_id})
-    if not client:
-        raise HTTPException(400, 'Client ID tidak valid')
-    existing = await _lmo(db).find_one({'order_code': payload.order_code})
-    if existing:
-        raise HTTPException(400, f'Order code {payload.order_code} sudah ada')
-    now = _now()
-    doc = payload.dict()
-    doc['id'] = _uid()
-    doc['client_name'] = client['name']
-    doc['created_at'] = now
-    doc['updated_at'] = now
-    doc['created_by'] = user.get('name', 'System')
-    doc.setdefault('linked_wo_ids', [])
-    doc.setdefault('sync_mode', 'manual')
-    doc.setdefault('stage_qty', {})
-    if doc['price_per_pcs'] > 0 and doc['qty_ordered'] > 0:
-        doc['total_value'] = doc['price_per_pcs'] * doc['qty_ordered']
-    await _lmo(db).insert_one(doc)
-    return {'message': 'Order maklon berhasil dibuat', 'id': doc['id'], 'order_code': doc['order_code']}
-
-
-@router.put('/orders/{order_id}', deprecated=True)
-async def update_order(order_id: str, payload: MaklonOrder, user: dict = Depends(require_auth)):
-    db = get_db()
-    existing = await _lmo(db).find_one({'id': order_id})
-    if not existing:
-        raise HTTPException(404, 'Order tidak ditemukan')
-    if payload.order_code != existing.get('order_code'):
-        conflict = await _lmo(db).find_one({'order_code': payload.order_code, 'id': {'$ne': order_id}})
-        if conflict:
-            raise HTTPException(400, f'Order code {payload.order_code} sudah digunakan')
-    update_data = payload.dict(exclude_unset=True)
-    update_data['updated_at'] = _now()
-    if 'price_per_pcs' in update_data or 'qty_ordered' in update_data:
-        price = update_data.get('price_per_pcs', existing.get('price_per_pcs', 0))
-        qty = update_data.get('qty_ordered', existing.get('qty_ordered', 0))
-        update_data['total_value'] = price * qty
-    await _lmo(db).update_one({'id': order_id}, {'$set': update_data})
-    return {'message': 'Order berhasil diperbarui'}
+# ══════════════════════════════════════════════════════════════════════════════
+# ORDER MANAGEMENT (LEGACY)
+# ══════════════════════════════════════════════════════════════════════════════
+# Phase C cleanup (2026-05-23): The following endpoints have been DELETED:
+#   - GET    /orders                          → use GET /api/dewi/maklon/pos
+#   - GET    /orders/{id}                     → use GET /api/dewi/maklon/pos/{po_id}
+#   - POST   /orders                          → use POST /api/dewi/maklon/pos
+#   - PUT    /orders/{id}                     → use PUT /api/dewi/maklon/pos/{po_id}
+#   - PUT    /orders/{id}/confirm             → use POST /api/dewi/maklon/pos/{po_id}/confirm
+#   - DELETE /orders/{id}                     → use POST /api/dewi/maklon/pos/{po_id}/cancel
+#
+# RETAINED for stage_qty workflow + material-issues (no PO equivalent):
+#   - PUT  /orders/{id}/status                (stage gate validation + WO sync)
+#   - PUT  /orders/{id}/stage-qty             (per-stage qty input)
+#   - GET  /orders/{id}/production-detail     (stage + WO aggregation)
+#   - POST /orders/{id}/material-issues       (issue material from rahaza_material_stock)
+#   - GET  /orders/{id}/material-issues       (list material issues for order)
+#   - DELETE /orders/{id}/material-issues/{issue_id}  (cancel issuance)
 
 
 @router.put('/orders/{order_id}/status', deprecated=True)
@@ -547,41 +402,6 @@ async def update_order_status(
             logger.warning(f"[notify] stage_change failed: {e}")
 
     return {'message': 'Status order diperbarui', 'status': new_status, 'progress_percentage': progress}
-
-
-@router.put('/orders/{order_id}/confirm', deprecated=True)
-async def confirm_order(order_id: str, user: dict = Depends(require_auth)):
-    """Confirm order (draft → confirmed) + auto-generate linked Work Orders."""
-    db = get_db()
-    order = await _lmo(db).find_one({'id': order_id})
-    if not order:
-        raise HTTPException(404, 'Order tidak ditemukan')
-    if order.get('status') != 'draft':
-        raise HTTPException(400, 'Hanya order draft yang bisa dikonfirmasi')
-
-    # ── Auto-generate Work Orders ─────────────────────────────────────────
-    wo_ids = await _auto_generate_wos(db, order, user)
-
-    now = _now()
-    await _lmo(db).update_one(
-        {'id': order_id},
-        {'$set': {
-            'status': 'confirmed',
-            'progress_percentage': STAGE_PROGRESS['confirmed'],
-            'confirmed_by': user.get('name'),
-            'confirmed_at': now,
-            'linked_wo_ids': wo_ids,
-            'sync_mode': 'wo' if wo_ids else 'manual',
-            'updated_at': now,
-        }}
-    )
-
-    return {
-        'message': 'Order dikonfirmasi',
-        'wo_generated': len(wo_ids),
-        'wo_ids': wo_ids,
-        'order_id': order_id,
-    }
 
 
 @router.put('/orders/{order_id}/stage-qty', deprecated=True)
@@ -706,21 +526,6 @@ async def get_order_production_detail(order_id: str, user: dict = Depends(requir
         'sync_mode': order.get('sync_mode', 'manual'),
         'wo_count': len(wos),
     }
-
-
-@router.delete('/orders/{order_id}', deprecated=True)
-async def cancel_order(order_id: str, user: dict = Depends(require_auth)):
-    db = get_db()
-    order = await _lmo(db).find_one({'id': order_id})
-    if not order:
-        raise HTTPException(404, 'Order tidak ditemukan')
-    if order.get('status') not in ['draft', 'confirmed']:
-        raise HTTPException(400, 'Order yang sudah dalam produksi tidak bisa dibatalkan')
-    await _lmo(db).update_one(
-        {'id': order_id},
-        {'$set': {'status': 'cancelled', 'updated_at': _now()}}
-    )
-    return {'message': 'Order dibatalkan'}
 
 
 # ══════════════════════════════════════════════════════════════════════════════

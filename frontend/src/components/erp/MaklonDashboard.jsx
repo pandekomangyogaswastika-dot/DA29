@@ -100,7 +100,7 @@ export default function MaklonDashboard({ token, onNavigate }) {
           <Button size="sm" onClick={() => onNavigate && onNavigate('maklon-clients')} className="gap-1.5">
             <Users className="w-3.5 h-3.5" /> Kelola Klien
           </Button>
-          <Button size="sm" onClick={() => onNavigate && onNavigate('maklon-orders')} variant="outline" className="gap-1.5">
+          <Button size="sm" onClick={() => onNavigate && onNavigate('maklon-po')} variant="outline" className="gap-1.5">
             <Package className="w-3.5 h-3.5" /> Kelola Order
           </Button>
         </div>
